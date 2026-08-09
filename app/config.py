@@ -25,7 +25,7 @@ class AppConfig:
 CONFIG = AppConfig(
     model_path=ROOT_DIR / "data" / "models" / "pigeon.pt",
     camera_index=0,
-    conf=0.45,
+    conf=0.6,
     device="cpu",
     visit_gap_sec=30.0,
     confirm_sec=2.0,
