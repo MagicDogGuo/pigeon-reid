@@ -1,0 +1,5 @@
+# Install CPU torch first (do not rely on ultralytics to pick the CUDA wheel):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# Then:
+ultralytics
+opencv-python
