@@ -2,7 +2,7 @@
 
 目標路徑：`D:\_myproject_WebsitePorjects\pigeon-reid`  
 環境：**CPU**  
-進度：**Phase 2 完成**（2026-08-09）→ 下一步 Phase 3（延後）
+進度：**Phase 3a 完成**（2026-08-09）→ 下一步 **3b**（`counter.py` 造訪狀態機）
 
 ---
 
@@ -13,7 +13,7 @@
 | --- | ---------- | ------------------------------ |
 | A   | 辨識有沒有鴿子    | 現成 YOLO 鴿／鳥偵測專案                |
 | B   | Webcam 即時  | Ultralytics / 現成 webcam script |
-| C   | 少樣本判斷是否同一隻 | **延後**（先不做 Phase 3）            |
+| C   | 少樣本判斷是否同一隻 | **延後**（Phase 4）                 |
 
 
 ---
@@ -61,9 +61,9 @@
 
 
 
-## 落地架構（clone + README，不自幹骨架）
+## 落地架構
 
-目前範圍（Phase 1–2）：
+### Phase 1–2（已完成）
 
 ```
 Webcam
@@ -71,21 +71,40 @@ Webcam
   → 畫框：有沒有鴿子
 ```
 
-本機目錄：
+### Phase 3（計畫中）
+
+```
+Webcam
+  → Ultralytics YOLO（pigeon.pt）
+  → 造訪計數 + 同時隻數 + 自動存照
+  → 本機 Flask 網頁（MJPEG + 數字 + 最近照片）
+```
+
+本機目錄（Phase 3 完成後預期）：
 
 ```
 pigeon-reid/
   .venv/           # 本機 venv（gitignore）
   vendor/          # 可選：clone 進來的參考 repo
+  app/             # Phase 3：薄 Flask 應用（非大型 package）
+    config.py      # 路徑、conf、visit_gap_sec、save_interval_sec
+    detector.py
+    counter.py
+    saver.py
+    web.py
+  templates/       # index.html 監控頁
+  static/          # 可選少量 CSS/JS
   data/models/     # YOLO .pt 權重
-  data/gallery/    # Phase 3 用（目前空著）
+  data/captures/   # Phase 3：YYYY-MM-DD/*.jpg（gitignore）
+  data/gallery/    # Phase 4 Re-ID 用（目前空著）
   data/samples/    # 本機煙霧測試圖（gitignore）
   requirements.txt
-  README.md        # 怎麼安裝與跑 + 實作備註
-  PLAN.md          # 本計畫 + 階段實作記錄
+  README.md
+  PLAN.md
 ```
 
-**不做**自寫 `pigeon_reid/` Python package；指令與流程寫在 README。
+Phase 1–2：**不做**自寫大型 package；以 README + YOLO CLI 為主。  
+Phase 3：新增薄 `app/`（設定集中 `config.py` 注入），**不用 React**。
 
 ---
 
@@ -194,13 +213,78 @@ pigeon-reid/
 
 可選後續：用自家 Roboflow API key 下載 Universe 資料集再 `yolo detect train`，覆蓋 `pigeon.pt`。見 [README.md](README.md) Phase 2。
 
-### Phase 3 — 少樣本同一隻（**延後，先不做**）
+### Phase 3 — 本機網頁監控（Flask）— **進行中（3a 完成）**
+
+目標：瀏覽器看即時畫面，顯示**今日造訪次數**與**目前同時隻數**，並在偵測到鴿子時自動拍照存資料夾。
+
+#### 技術選擇（已拍板）
+
+- **Flask + Jinja／簡單 HTML+JS**（本機 `localhost`）
+- **不用 React**（YOLO／存圖本來就在 Python；本機監控頁不需 Node 雙進程）
+- 即時畫面：MJPEG stream（可參考 `vendor/Bird-Detection`）
+
+#### 計數規則（已定）
+
+1. **同時隻數（live）**：當前幀 YOLO 框數；畫面上 3 隻就顯示 **3**
+2. **今日造訪次數（visit）**：
+   - `0 → ≥1`：開始一次造訪，今日計數 **+1**
+   - 連續 **N 秒**（預設 30s）偵測為 0：結束造訪
+   - 同一造訪期間不重複加計
+3. **不認個體**（那是 Phase 4）；今日數字是「造訪次數」，不是「幾隻不同的鴿」
+
+#### 資料流
+
+```
+Webcam → Detector → Counter → Flask UI
+              ↓         ↓
+            Stream    Saver → data/captures/YYYY-MM-DD/
+```
+
+- **Detector**：OpenCV DSHOW `source=0` + `data/models/pigeon.pt`（`conf=0.45`, CPU）
+- **Counter**：同時隻數 + 造訪狀態機 + 依本機本地日切換
+- **Saver**：造訪開始必存一張；造訪中每 M 秒（預設 10s）最多再存一張
+- **Flask UI**：MJPEG、今日造訪、當前同時隻數、最近存檔縮圖
+
+存檔範例：`data/captures/2026-08-09/visit003_20260809_171530_n2.jpg`
+
+#### 小階段
+
+| 小階段 | 內容 | 驗收 |
+| --- | --- | --- |
+| **3a** | `detector.py`：webcam + `pigeon.pt` 迴路（無 UI） | **完成**（2026-08-09）：有鴿 `boxes >= 1`，無鴿為 0 |
+| **3b** | `counter.py`：`concurrent_count`、`visits_today`、gap=30s | 進畫面 +1；同造訪不重複；離開 30s 再進再 +1；同時 3 顯示 3 |
+| **3c** | `saver.py` → `data/captures/YYYY-MM-DD/`；gitignore | 造訪後有 JPEG；檔名含時間與隻數 |
+| **3d** | Flask：`/`、`/video_feed`、`/api/stats`；`requirements.txt` 加 flask | `http://127.0.0.1:5000` 可看流與數字 |
+| **3e** | 更新 README 啟動指令與參數；入口 `python -m app.web` | 文件可照做跑起來 |
+
+#### 3a 實作記錄
+
+
+| 項目 | 結果 |
+| --- | --- |
+| 檔案 | `app/config.py`（`AppConfig` / `CONFIG` 注入）、`app/detector.py` |
+| API | `Detector(config).predict_frame(frame)` / `open`+`read` / `frames()` |
+| 圖像煙霧 | `pigeon_flock.png` → **11**；`pigeon_closeup.png` → **5**；`bird.jpg` → **0** |
+| Webcam | DSHOW `source=0`，連續 8 幀推論成功（`480×640×3`，現場無鴿 → boxes=0） |
+| 無 UI 迴路 | `python -m app.detector`（Ctrl+C 結束） |
+| 已知限制 | 非鴿圖（如 `person.jpg`）在 `conf=0.45` 仍可能有 FP（同 Phase 2） |
+
+#### Phase 3 刻意不做
+
+- React / Node 前端
+- 登入、雲端、多使用者、公開部署
+- 個體 Re-ID（Phase 4）
+- 改動 Phase 0–2 已驗證的權重與 YOLO CLI 流程
+
+### Phase 4 — 少樣本同一隻（**延後，先不做**）
+
+（原 Phase 3 Re-ID，整段後移。）
 
 之後若要做，可：
 
 - clone `wildlife-tools`，用 MegaDescriptor
 - 或直接抄 Camel Re-ID 的 YOLO+MegaDescriptor pipeline
-- `register`：丟 5–20 張童鴿照片
+- `register`：丟 5–20 張童鴿照片到 `data/gallery/<id>/`
 - webcam／單圖：輸出是否同一隻 + 相似度
 - 驗收：註冊後再拍，能對上；陌生鴿顯示 unknown
 
@@ -212,7 +296,8 @@ pigeon-reid/
 
 - 驅鳥硬體（雷射、水槍、Raspberry Pi）
 - 從頭訓練大型 Re-ID 模型
-- 網站／雲端（目前本機 CPU 優先）
+- **雲端／公開部署**（本機 Flask OK；不做對外網站）
+- Phase 4 少樣本同一隻（延後）
 
 ---
 
@@ -225,6 +310,8 @@ pigeon-reid/
 | -------------- | --------------------- |
 | 偵測 + webcam    | 高，現成很多                |
 | CPU 即時 FPS     | 偏低（數 FPS～十來 FPS）      |
+| 本機 Flask 監控頁   | 高；MJPEG + 計數狀態機可落地     |
+| 造訪次數 ≠ 個體數     | 預期內；真正認隻要等 Phase 4     |
 | 少樣本同一隻         | 中；角度／光線差會誤判，需多角度照片    |
 | 單一 GitHub 全包三點 | **幾乎沒有**，要組 2～3 個現成專案 |
 
@@ -236,6 +323,6 @@ pigeon-reid/
 ## 已拍板
 
 1. **偵測底層**：**Ultralytics + Roboflow**
-2. **Re-ID**：**先不做 Phase 3**（之後可加 wildlife-tools + MegaDescriptor）
-3. **專案形態**：**clone + README**（不保留自寫 `pigeon_reid/` 骨架）
-
+2. **Phase 3 UI**：**本機 Flask**（不用 React）；造訪次數 + 同時隻數 + 自動存照
+3. **Re-ID**：**延後為 Phase 4**（之後可加 wildlife-tools + MegaDescriptor）
+4. **專案形態**：Phase 1–2 以 clone + README／CLI 為主；Phase 3 新增薄 `app/`（非大型 package）
