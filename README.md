@@ -6,7 +6,7 @@ Local **CPU** pigeon detection with webcam, built from existing tools (not a cus
 |-------|--------|--------|
 | Environment | **Phase 0 done** (2026-08-09) | Python 3.10 venv, CPU torch, ultralytics, opencv |
 | Detect bird (COCO) | **Phase 1 done** (2026-08-09) | `yolov8n.pt` + webcam `source=0` |
-| Detect pigeon | Phase 2 | Ultralytics + [Roboflow](https://universe.roboflow.com/) pigeon weights |
+| Detect pigeon | **Phase 2 done** (2026-08-09) | `pigeon.pt` (1-class Roboflow fine-tune) + webcam |
 | Same-bird Re-ID | Deferred | wildlife-tools / MegaDescriptor later |
 
 See [PLAN.md](PLAN.md) for the full plan and implementation notes.
@@ -112,28 +112,65 @@ yolo predict model=data/models/yolov8n.pt source=data/samples/bird.jpg device=cp
 git clone --depth 1 https://github.com/Aamer-Gituser/Bird-Detection.git vendor/Bird-Detection
 ```
 
-Useful entry points there: `webcam_pilot.py`, Flask `app.py`. Swap their weights for a pigeon `.pt` in Phase 2.
+Useful entry points there: `webcam_pilot.py`, Flask `app.py`. Phase 2 weights: `data/models/pigeon.pt`.
 
-## Phase 2 — Pigeon-specific weights (Roboflow) — not started
+## Phase 2 — Pigeon-specific weights — done
 
-1. Open a dataset, e.g.  
-   - https://universe.roboflow.com/yolov8-group-1/pigeon-detection-l2ivt  
-   - https://universe.roboflow.com/pigeon-cn3z7/pigeons-detection-rm5js  
-2. Download **YOLOv8** format (or export a trained model / `.pt` if the project provides one).  
-3. Place weights at `data/models/pigeon.pt` (or keep the Roboflow export folder and point `model=` at the `.pt`).
+Verified on this machine (2026-08-09):
 
-Webcam with pigeon weights:
+- Weights: `data/models/pigeon.pt` — YOLOv8n fine-tuned on a Roboflow **Pigeon**-only dataset (`nc: 1`, class `Pigeon`)
+- Source: [Prajapatidhruv1206/pigeon-yolov8-detection](https://github.com/Prajapatidhruv1206/pigeon-yolov8-detection) `runs/detect/train/weights/best.pt` (local clone: `vendor/pigeon-yolov8-detection`)
+- Image smoke (`conf=0.45`): flock sample **11** pigeons; close-up **5**; Phase 1 `bird.jpg` **0** (not pigeon-specific enough); webcam **8** frames inferred on CPU
+
+### 1) Install weights (already copied if you followed this machine’s setup)
 
 ```powershell
-yolo predict model=data/models/pigeon.pt source=0 device=cpu conf=0.25 show=True
+.\.venv\Scripts\Activate.ps1
+git clone --depth 1 https://github.com/Prajapatidhruv1206/pigeon-yolov8-detection.git vendor/pigeon-yolov8-detection
+Copy-Item vendor/pigeon-yolov8-detection/runs/detect/train/weights/best.pt data/models/pigeon.pt
 ```
 
-Fine-tune on your own export (example):
+### 2) Live webcam (pigeon boxes only)
+
+No `classes=` filter needed — the model only knows `Pigeon`. Prefer **`conf=0.45`** (or higher) to cut false positives on non-pigeon scenes.
 
 ```powershell
+yolo predict model=data/models/pigeon.pt source=0 device=cpu conf=0.45 show=True
+```
+
+| Parameter | Example | Meaning |
+|-----------|---------|---------|
+| `model` | `data/models/pigeon.pt` | Pigeon-only fine-tuned weights (not COCO). |
+| `source` | `0` | Webcam index, or image/video path. |
+| `device` | `cpu` | This project uses CPU. |
+| `conf` | `0.45` | Confidence threshold. Higher = fewer boxes / fewer false positives. |
+| `show` | `True` | Preview window; press `q` to quit. |
+
+### 3) Optional image smoke
+
+```powershell
+yolo predict model=data/models/pigeon.pt source=data/samples/pigeon_flock.png device=cpu conf=0.45 save=True
+```
+
+### Optional: retrain from Roboflow Universe yourself
+
+Needs a free [Roboflow API key](https://roboflow.com/). Example datasets:
+
+- https://universe.roboflow.com/yolov8-group-1/pigeon-detection-l2ivt  
+- https://universe.roboflow.com/pigeon-cn3z7/pigeons-detection-rm5js  
+
+```powershell
+pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org roboflow
+# then download YOLOv8 export via Roboflow SDK / CLI into a local folder
 yolo detect train data=path/to/data.yaml model=yolov8n.pt epochs=50 imgsz=640 device=cpu
-# then copy best.pt -> data/models/pigeon.pt
+Copy-Item runs/detect/train/weights/best.pt data/models/pigeon.pt
 ```
+
+Notes:
+
+- Phase 2 labels **`Pigeon` only** (not COCO `bird` / person / chair).
+- Some non-pigeon images can still get false positives at low `conf`; raise the threshold if needed.
+- CPU FPS stays modest (same as Phase 1).
 
 ## Phase 3 — Same individual (deferred) — not started
 

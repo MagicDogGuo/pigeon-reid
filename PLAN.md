@@ -2,7 +2,7 @@
 
 目標路徑：`D:\_myproject_WebsitePorjects\pigeon-reid`  
 環境：**CPU**  
-進度：**Phase 1 完成**（2026-08-09）→ 下一步 Phase 2
+進度：**Phase 2 完成**（2026-08-09）→ 下一步 Phase 3（延後）
 
 ---
 
@@ -67,7 +67,7 @@
 
 ```
 Webcam
-  → Ultralytics YOLO（Roboflow 鴿權重／先用 COCO bird）
+  → Ultralytics YOLO（data/models/pigeon.pt，單類 Pigeon）
   → 畫框：有沒有鴿子
 ```
 
@@ -157,18 +157,42 @@ pigeon-reid/
 注意：
 
 - Phase 1 用 COCO **bird**，不是鴿子專用；鏡頭前沒鳥時可能仍偵測到其他 COCO 類別（人／椅等），可加 `classes=14` 只畫鳥
-- 真正「只標鴿子」留到 Phase 2（Roboflow `pigeon.pt`）
+- 真正「只標鴿子」已在 **Phase 2**（`data/models/pigeon.pt`）
 - CPU 即時 FPS 預期偏低
 
 細節與指令見 [README.md](README.md)。
 
-### Phase 2 — 換成「鴿子」專用 — 未開始
+### Phase 2 — 換成「鴿子」專用 — **已完成（2026-08-09）**
 
-- 下載／fine-tune Roboflow 鴿資料
+- 採用現成 Roboflow 單類 **Pigeon** fine-tune 權重（非 COCO `bird`）
 - 權重放到 `data/models/pigeon.pt`
-- 驗收：只標鴿子、誤報變少
+- 驗收：只輸出 `Pigeon`；鴿群樣本可畫框；webcam 可推論
+
+實作記錄：
 
 
+| 項目      | 結果                                                                                                                          |
+| ------- | --------------------------------------------------------------------------------------------------------------------------- |
+| 權重      | `data/models/pigeon.pt`（~6.0 MB；`names={0: Pigeon}`）                                                                        |
+| 來源      | [pigeon-yolov8-detection](https://github.com/Prajapatidhruv1206/pigeon-yolov8-detection) `best.pt`（Roboflow 標註資料 fine-tune） |
+| 本機參考    | `vendor/pigeon-yolov8-detection`（gitignore）                                                                                 |
+| 圖像煙霧    | `pigeon_flock.png` → **11** @ `conf=0.45`；`pigeon_closeup.png` → **5**；Phase 1 `bird.jpg` → **0**（非鴿專用）                    |
+| Webcam  | DSHOW `source=0`，連續 8 幀 YOLO 推論成功（`480×640×3`）                                                                              |
+| 建議 conf | **0.45**（過低易在非鴿場景誤報；例如 `person.jpg` 仍可能有 FP）                                                                               |
+| 即時預覽指令  | `yolo predict model=data/models/pigeon.pt source=0 device=cpu conf=0.45 show=True`                                          |
+
+
+參數差異（相對 Phase 1）：
+
+
+| 參數        | Phase 1                         | Phase 2                                      |
+| --------- | ------------------------------- | -------------------------------------------- |
+| `model`   | `data/models/yolov8n.pt`（COCO）  | `data/models/pigeon.pt`（Pigeon-only）         |
+| `classes` | `14`（COCO bird）                 | **不需要**（模型只有一類）                              |
+| `conf`    | `0.25`                          | 建議 `0.45`                                    |
+
+
+可選後續：用自家 Roboflow API key 下載 Universe 資料集再 `yolo detect train`，覆蓋 `pigeon.pt`。見 [README.md](README.md) Phase 2。
 
 ### Phase 3 — 少樣本同一隻（**延後，先不做**）
 
