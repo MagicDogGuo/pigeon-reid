@@ -19,6 +19,7 @@ class AppConfig:
     save_interval_sec: float
     captures_dir: Path
     camera_warmup_frames: int
+    camera_probe_max: int
 
 
 CONFIG = AppConfig(
@@ -31,4 +32,5 @@ CONFIG = AppConfig(
     save_interval_sec=10.0,
     captures_dir=ROOT_DIR / "data" / "captures",
     camera_warmup_frames=5,
+    camera_probe_max=5,
 )

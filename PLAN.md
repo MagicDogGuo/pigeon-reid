@@ -244,7 +244,7 @@ Webcam → Detector → Counter → Flask UI
 - **Detector**：OpenCV DSHOW `source=0` + `data/models/pigeon.pt`（`conf=0.45`, CPU）
 - **Counter**：同時隻數 + 造訪狀態機（`confirm_sec` 確認後才計次）+ 依本機本地日切換
 - **Saver**：造訪開始（確認後）必存一張；造訪中每 M 秒（預設 10s）最多再存一張
-- **Flask UI**：MJPEG、今日造訪、當前同時隻數、最近存檔縮圖
+- **Flask UI**：MJPEG、今日造訪、當前同時隻數、最近存檔縮圖、**切換攝影機**
 
 存檔範例：`data/captures/2026-08-09/visit003_20260809_171530_n2.jpg`
 

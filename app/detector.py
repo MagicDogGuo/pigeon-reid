@@ -26,17 +26,22 @@ class Detector:
 
     def __init__(self, config: AppConfig) -> None:
         self._config = config
+        self._camera_index = config.camera_index
         self._model = YOLO(str(config.model_path))
         self._cap: Optional[cv2.VideoCapture] = None
+
+    @property
+    def camera_index(self) -> int:
+        return self._camera_index
 
     def open(self) -> None:
         if self._cap is not None and self._cap.isOpened():
             return
-        cap = cv2.VideoCapture(self._config.camera_index, cv2.CAP_DSHOW)
+        cap = cv2.VideoCapture(self._camera_index, cv2.CAP_DSHOW)
         if not cap.isOpened():
             cap.release()
             raise RuntimeError(
-                f"Failed to open webcam index {self._config.camera_index}"
+                f"Failed to open webcam index {self._camera_index}"
             )
         for _ in range(self._config.camera_warmup_frames):
             cap.read()
@@ -46,6 +51,29 @@ class Detector:
         if self._cap is not None:
             self._cap.release()
             self._cap = None
+
+    def switch_camera(self, camera_index: int) -> None:
+        """Close current capture (if any) and open a different camera index."""
+        if camera_index < 0:
+            raise ValueError(f"camera_index must be >= 0, got {camera_index}")
+        if (
+            self._cap is not None
+            and self._cap.isOpened()
+            and camera_index == self._camera_index
+        ):
+            return
+        previous = self._camera_index
+        self.close()
+        self._camera_index = camera_index
+        try:
+            self.open()
+        except Exception:
+            self._camera_index = previous
+            try:
+                self.open()
+            except Exception:
+                pass
+            raise
 
     def predict_frame(self, frame: np.ndarray) -> DetectionFrame:
         result = self._model.predict(
@@ -88,6 +116,17 @@ class Detector:
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
+
+
+def list_camera_indices(probe_max: int) -> list[int]:
+    """Return candidate camera indices 0..probe_max.
+
+    Windows DSHOW probing of missing devices can hang, so the UI offers this
+    fixed range and open/switch validates the chosen index.
+    """
+    if probe_max < 0:
+        raise ValueError(f"probe_max must be >= 0, got {probe_max}")
+    return list(range(probe_max + 1))
 
 
 def main() -> None:

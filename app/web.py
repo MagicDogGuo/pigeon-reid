@@ -10,11 +10,11 @@ from pathlib import Path
 from typing import Deque, Generator, Optional
 
 import cv2
-from flask import Flask, Response, jsonify, render_template, send_from_directory
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 
 from app.config import AppConfig, CONFIG, ROOT_DIR
 from app.counter import VisitCounter, VisitStats
-from app.detector import Detector
+from app.detector import Detector, list_camera_indices
 from app.saver import CaptureSaver
 
 RECENT_CAPTURE_LIMIT = 12
@@ -30,6 +30,8 @@ class MonitorSnapshot:
     stats: Optional[VisitStats]
     recent: list[str]
     error: Optional[str]
+    camera_index: int
+    switching: bool
 
 
 class MonitorRuntime:
@@ -42,8 +44,16 @@ class MonitorRuntime:
         self._stats: Optional[VisitStats] = None
         self._recent: Deque[str] = deque(maxlen=RECENT_CAPTURE_LIMIT)
         self._error: Optional[str] = None
+        self._camera_index = config.camera_index
+        self._switch_to: Optional[int] = None
+        self._switching = False
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+
+    @property
+    def camera_index(self) -> int:
+        with self._lock:
+            return self._camera_index
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -62,6 +72,21 @@ class MonitorRuntime:
             self._thread.join(timeout=5.0)
             self._thread = None
 
+    def request_camera(self, camera_index: int) -> int:
+        """Ask the worker to switch cameras; returns the requested index."""
+        if camera_index < 0:
+            raise ValueError(f"camera_index must be >= 0, got {camera_index}")
+        with self._lock:
+            if camera_index == self._camera_index and not self._switching:
+                return camera_index
+            self._switch_to = camera_index
+            self._switching = True
+            self._error = f"switching to camera {camera_index}…"
+        return camera_index
+
+    def list_cameras(self) -> list[int]:
+        return list_camera_indices(self._config.camera_probe_max)
+
     def snapshot(self) -> MonitorSnapshot:
         with self._lock:
             return MonitorSnapshot(
@@ -69,6 +94,8 @@ class MonitorRuntime:
                 stats=self._stats,
                 recent=list(self._recent),
                 error=self._error,
+                camera_index=self._camera_index,
+                switching=self._switching,
             )
 
     def mjpeg_frames(self) -> Generator[bytes, None, None]:
@@ -97,6 +124,7 @@ class MonitorRuntime:
             self._jpeg_bytes = jpeg_bytes
             self._stats = stats
             self._error = None
+            self._switching = False
             if saved_rel is not None:
                 self._recent.appendleft(saved_rel)
 
@@ -113,18 +141,41 @@ class MonitorRuntime:
     def _relative_capture(self, path: Path) -> str:
         return path.relative_to(self._config.captures_dir).as_posix()
 
+    def _apply_pending_switch(self, detector: Detector) -> None:
+        with self._lock:
+            target = self._switch_to
+            self._switch_to = None
+        if target is None:
+            return
+        try:
+            detector.switch_camera(target)
+            with self._lock:
+                self._camera_index = detector.camera_index
+                self._jpeg_bytes = None
+                self._error = f"switched to camera {detector.camera_index}"
+                self._switching = False
+        except Exception as exc:  # noqa: BLE001 — surface to UI
+            with self._lock:
+                self._camera_index = detector.camera_index
+                self._switching = False
+                self._error = f"camera switch failed: {exc}"
+
     def _run_loop(self) -> None:
         detector = Detector(self._config)
         counter = VisitCounter(self._config)
         saver = CaptureSaver(self._config)
         try:
             detector.open()
+            with self._lock:
+                self._camera_index = detector.camera_index
         except Exception as exc:  # noqa: BLE001 — surface to UI
             self._set_error(f"camera open failed: {exc}")
             return
 
         try:
             while not self._stop.is_set():
+                self._apply_pending_switch(detector)
+
                 detection = detector.read()
                 if detection is None:
                     self._set_error("camera read failed")
@@ -163,6 +214,9 @@ def create_app(
         template_folder=str(ROOT_DIR / "templates"),
         static_folder=str(ROOT_DIR / "static"),
     )
+    # Local monitor: pick up HTML/CSS edits without restarting.
+    app.config["TEMPLATES_AUTO_RELOAD"] = True
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
     app.config["PIGEON_CONFIG"] = cfg
     app.config["PIGEON_RUNTIME"] = monitor
 
@@ -189,8 +243,34 @@ def create_app(
             "recent": snap.recent,
             "error": snap.error,
             "has_frame": snap.jpeg_bytes is not None,
+            "camera_index": snap.camera_index,
+            "switching": snap.switching,
         }
         return jsonify(payload)
+
+    @app.route("/api/cameras")
+    def api_cameras():
+        cameras = monitor.list_cameras()
+        return jsonify(
+            {
+                "cameras": cameras,
+                "current": monitor.camera_index,
+                "probe_max": cfg.camera_probe_max,
+            }
+        )
+
+    @app.route("/api/camera", methods=["POST"])
+    def api_camera():
+        body = request.get_json(silent=True) or {}
+        raw = body.get("index", body.get("camera_index"))
+        try:
+            index = int(raw)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "index must be an integer"}), 400
+        if index < 0:
+            return jsonify({"ok": False, "error": "index must be >= 0"}), 400
+        requested = monitor.request_camera(index)
+        return jsonify({"ok": True, "requested": requested, "current": monitor.camera_index})
 
     @app.route("/captures/<path:rel_path>")
     def serve_capture(rel_path: str):
@@ -212,7 +292,8 @@ def main() -> None:
     app = create_app(CONFIG)
     print(
         f"pigeon monitor → http://127.0.0.1:5000 "
-        f"model={CONFIG.model_path.name} conf={CONFIG.conf}"
+        f"model={CONFIG.model_path.name} conf={CONFIG.conf} "
+        f"camera={CONFIG.camera_index}"
     )
     # threaded=True: MJPEG + /api/stats while the worker holds the camera.
     # use_reloader=False: avoid opening the webcam twice.

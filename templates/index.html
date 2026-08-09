@@ -14,6 +14,18 @@
 
   <main class="layout">
     <section class="live" aria-label="Live video">
+      <div class="toolbar">
+        <label class="camera-label" for="camera-select">Camera</label>
+        <select id="camera-select" aria-label="Camera index">
+          <option value="0">Camera 0</option>
+          <option value="1">Camera 1</option>
+          <option value="2">Camera 2</option>
+          <option value="3">Camera 3</option>
+          <option value="4">Camera 4</option>
+          <option value="5">Camera 5</option>
+        </select>
+        <button id="camera-refresh" type="button" title="Reload camera list">Reload</button>
+      </div>
       <img
         id="video"
         src="{{ url_for('video_feed') }}"
@@ -54,6 +66,82 @@
     const localDateEl = document.getElementById("local-date");
     const statusEl = document.getElementById("status");
     const thumbsEl = document.getElementById("thumbs");
+    const cameraSelect = document.getElementById("camera-select");
+    const cameraRefresh = document.getElementById("camera-refresh");
+
+    let cameraBusy = false;
+    let lastCameraIndex = null;
+
+    function fillCameraSelect(cameras, current) {
+      const values = Array.from(new Set([...(cameras || []), current]))
+        .filter((v) => v !== null && v !== undefined)
+        .sort((a, b) => a - b);
+      cameraSelect.replaceChildren();
+      for (const idx of values) {
+        const opt = document.createElement("option");
+        opt.value = String(idx);
+        opt.textContent = "Camera " + idx;
+        if (idx === current) opt.selected = true;
+        cameraSelect.appendChild(opt);
+      }
+      if (!values.length) {
+        const opt = document.createElement("option");
+        opt.value = String(current ?? 0);
+        opt.textContent = "Camera " + (current ?? 0);
+        opt.selected = true;
+        cameraSelect.appendChild(opt);
+      }
+      lastCameraIndex = current;
+    }
+
+    async function loadCameras() {
+      const res = await fetch("/api/cameras", { cache: "no-store" });
+      if (!res.ok) throw new Error("cameras HTTP " + res.status);
+      const data = await res.json();
+      fillCameraSelect(data.cameras || [], data.current);
+    }
+
+    async function switchCamera(index) {
+      if (cameraBusy) return;
+      cameraBusy = true;
+      cameraSelect.disabled = true;
+      cameraRefresh.disabled = true;
+      statusEl.textContent = "Switching to camera " + index + "…";
+      statusEl.classList.remove("err");
+      try {
+        const res = await fetch("/api/camera", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ index: Number(index) }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || ("camera HTTP " + res.status));
+        }
+        lastCameraIndex = Number(index);
+      } catch (err) {
+        statusEl.textContent = "Camera switch failed";
+        statusEl.classList.add("err");
+        if (lastCameraIndex !== null) cameraSelect.value = String(lastCameraIndex);
+      } finally {
+        cameraBusy = false;
+        cameraSelect.disabled = false;
+        cameraRefresh.disabled = false;
+      }
+    }
+
+    cameraSelect.addEventListener("change", () => {
+      switchCamera(cameraSelect.value);
+    });
+
+    cameraRefresh.addEventListener("click", async () => {
+      try {
+        await loadCameras();
+      } catch (err) {
+        statusEl.textContent = "Camera scan failed";
+        statusEl.classList.add("err");
+      }
+    });
 
     async function refreshStats() {
       try {
@@ -66,14 +154,32 @@
         inVisitEl.textContent = data.in_visit ? "yes" : "no";
         localDateEl.textContent = data.local_date || "—";
 
+        if (
+          data.camera_index !== undefined &&
+          !cameraBusy &&
+          document.activeElement !== cameraSelect
+        ) {
+          const exists = Array.from(cameraSelect.options).some(
+            (o) => Number(o.value) === data.camera_index
+          );
+          if (!exists) {
+            const opt = document.createElement("option");
+            opt.value = String(data.camera_index);
+            opt.textContent = "Camera " + data.camera_index;
+            cameraSelect.appendChild(opt);
+          }
+          cameraSelect.value = String(data.camera_index);
+          lastCameraIndex = data.camera_index;
+        }
+
         if (data.error) {
           statusEl.textContent = data.error;
-          statusEl.classList.add("err");
+          statusEl.classList.toggle("err", !data.switching);
         } else if (!data.has_frame) {
           statusEl.textContent = "Waiting for first frame…";
           statusEl.classList.remove("err");
         } else {
-          statusEl.textContent = "Live";
+          statusEl.textContent = "Live · camera " + data.camera_index;
           statusEl.classList.remove("err");
         }
 
@@ -96,6 +202,7 @@
       }
     }
 
+    loadCameras().catch(() => {});
     refreshStats();
     setInterval(refreshStats, 1000);
   </script>

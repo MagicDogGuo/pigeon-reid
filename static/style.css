@@ -50,6 +50,53 @@ body {
   min-width: 0;
 }
 
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.65rem;
+  padding: 0.55rem 0.7rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.camera-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.toolbar select,
+.toolbar button {
+  font: inherit;
+  color: var(--text);
+  background: #1a211d;
+  border: 1px solid var(--line);
+  padding: 0.4rem 0.65rem;
+  min-height: 2rem;
+}
+
+.toolbar select {
+  min-width: 8.5rem;
+}
+
+.toolbar button {
+  cursor: pointer;
+  color: var(--accent);
+}
+
+.toolbar button:hover,
+.toolbar select:hover {
+  border-color: var(--accent);
+}
+
+.toolbar button:disabled,
+.toolbar select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .live img {
   display: block;
   width: 100%;
