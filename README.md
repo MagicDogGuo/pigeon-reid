@@ -7,7 +7,7 @@ Local **CPU** pigeon detection with webcam, built from existing tools (not a cus
 | Environment | **Phase 0 done** (2026-08-09) | Python 3.10 venv, CPU torch, ultralytics, opencv |
 | Detect bird (COCO) | **Phase 1 done** (2026-08-09) | `yolov8n.pt` + webcam `source=0` |
 | Detect pigeon | **Phase 2 done** (2026-08-09) | `pigeon.pt` (1-class Roboflow fine-tune) + webcam |
-| Local monitor (Flask) | **Phase 3 in progress** (3b done) | `app/detector.py` + `app/counter.py` → next: saver / Flask UI |
+| Local monitor (Flask) | **Phase 3 in progress** (3c done) | detector + counter + saver → next: Flask UI |
 | Same-bird Re-ID | Deferred (Phase 4) | wildlife-tools / MegaDescriptor later |
 
 See [PLAN.md](PLAN.md) for the full plan and implementation notes.
@@ -22,6 +22,7 @@ pigeon-reid/
     config.py
     detector.py     # 3a done
     counter.py      # 3b done
+    saver.py        # 3c done
   data/models/      # YOLO weights (.pt, gitignored)
   data/gallery/     # reserved for Phase 4 Re-ID
   data/samples/     # local smoke-test images (gitignored)

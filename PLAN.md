@@ -2,7 +2,7 @@
 
 目標路徑：`D:\_myproject_WebsitePorjects\pigeon-reid`  
 環境：**CPU**  
-進度：**Phase 3b 完成**（2026-08-09）→ 下一步 **3c**（`saver.py` 自動存照）
+進度：**Phase 3c 完成**（2026-08-09）→ 下一步 **3d**（Flask UI）
 
 ---
 
@@ -213,7 +213,7 @@ Phase 3：新增薄 `app/`（設定集中 `config.py` 注入），**不用 React
 
 可選後續：用自家 Roboflow API key 下載 Universe 資料集再 `yolo detect train`，覆蓋 `pigeon.pt`。見 [README.md](README.md) Phase 2。
 
-### Phase 3 — 本機網頁監控（Flask）— **進行中（3b 完成）**
+### Phase 3 — 本機網頁監控（Flask）— **進行中（3c 完成）**
 
 目標：瀏覽器看即時畫面，顯示**今日造訪次數**與**目前同時隻數**，並在偵測到鴿子時自動拍照存資料夾。
 
@@ -253,7 +253,7 @@ Webcam → Detector → Counter → Flask UI
 | --- | --- | --- |
 | **3a** | `detector.py`：webcam + `pigeon.pt` 迴路（無 UI） | **完成**（2026-08-09）：有鴿 `boxes >= 1`，無鴿為 0 |
 | **3b** | `counter.py`：`concurrent_count`、`visits_today`、gap=30s | **完成**（2026-08-09）：`0→N` 則 +N；同造訪不重複；離開 30s 再進再加；同時 3 顯示 3 |
-| **3c** | `saver.py` → `data/captures/YYYY-MM-DD/`；gitignore | 造訪後有 JPEG；檔名含時間與隻數 |
+| **3c** | `saver.py` → `data/captures/YYYY-MM-DD/`；gitignore | **完成**（2026-08-09）：造訪開始必存；間隔再存；檔名含時間與隻數 |
 | **3d** | Flask：`/`、`/video_feed`、`/api/stats`；`requirements.txt` 加 flask | `http://127.0.0.1:5000` 可看流與數字 |
 | **3e** | 更新 README 啟動指令與參數；入口 `python -m app.web` | 文件可照做跑起來 |
 
@@ -279,6 +279,18 @@ Webcam → Detector → Counter → Flask UI
 | 規則 | `0→N` 開始造訪 **+N**；同造訪不重複；連續 `visit_gap_sec`（預設 30）為 0 結束；本機本地日切換重設 |
 | 注入 | `visit_gap_sec` 來自 `AppConfig`；可注入 `now_fn` 做確定性測試 |
 | 煙霧 | `python -m app.counter` → 進畫面 3 隻 +3、同造訪不加成、+29s 仍在訪、+30s 結束、再進 1 隻 +1、跨日歸零 → **OK** |
+
+#### 3c 實作記錄
+
+
+| 項目 | 結果 |
+| --- | --- |
+| 檔案 | `app/saver.py`（`CaptureSaver`）；`data/captures/.gitkeep`；gitignore `data/captures/**` |
+| API | `CaptureSaver(config, now_fn=…).maybe_save(frame, stats) → Path \| None` |
+| 規則 | 造訪開始必存；造訪中每 `save_interval_sec`（預設 10s）最多再存一張；`concurrent_count < 1` 不存 |
+| 路徑 | `data/captures/YYYY-MM-DD/visitNNN_YYYYMMDD_HHMMSS_nK.jpg` |
+| 注入 | `captures_dir` / `save_interval_sec` 來自 `AppConfig`；可注入 `now_fn` |
+| 煙霧 | `python -m app.saver` → start 存 visit001、未滿 10s 不存、+10s 再存、gap 不存、新造訪 visit002 → **OK** |
 
 #### Phase 3 刻意不做
 
