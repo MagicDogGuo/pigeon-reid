@@ -20,6 +20,11 @@ data/models/**
 data/gallery/**
 !data/gallery/.gitkeep
 !data/gallery/**/.gitkeep
+data/samples/
+
+# Optional cloned reference repos (keep folder via .gitkeep)
+vendor/**
+!vendor/.gitkeep
 
 # OS / IDE
 .DS_Store

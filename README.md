@@ -5,8 +5,8 @@ Local **CPU** pigeon detection with webcam, built from existing tools (not a cus
 | Layer | Status | Stack |
 |-------|--------|--------|
 | Environment | **Phase 0 done** (2026-08-09) | Python 3.10 venv, CPU torch, ultralytics, opencv |
-| Detect pigeon | Phase 1–2 | [Ultralytics](https://github.com/ultralytics/ultralytics) + [Roboflow](https://universe.roboflow.com/) |
-| Webcam | Phase 1 | `yolo predict ... source=0` |
+| Detect bird (COCO) | **Phase 1 done** (2026-08-09) | `yolov8n.pt` + webcam `source=0` |
+| Detect pigeon | Phase 2 | Ultralytics + [Roboflow](https://universe.roboflow.com/) pigeon weights |
 | Same-bird Re-ID | Deferred | wildlife-tools / MegaDescriptor later |
 
 See [PLAN.md](PLAN.md) for the full plan and implementation notes.
@@ -16,9 +16,10 @@ See [PLAN.md](PLAN.md) for the full plan and implementation notes.
 ```
 pigeon-reid/
   .venv/            # local venv (gitignored)
-  vendor/           # optional cloned reference repos
-  data/models/      # YOLO weights (.pt)
+  vendor/           # optional cloned reference repos (gitignored contents)
+  data/models/      # YOLO weights (.pt, gitignored)
   data/gallery/     # reserved for Phase 3
+  data/samples/     # local smoke-test images (gitignored)
   requirements.txt
   README.md
   PLAN.md
@@ -59,25 +60,59 @@ python -c "import cv2; c=cv2.VideoCapture(0); print(c.isOpened()); r,f=c.read();
 
 If the first grab fails, retry once or warm up a few frames; DSHOW also works on Windows (`cv2.VideoCapture(0, cv2.CAP_DSHOW)`).
 
-## Phase 1 — Webcam smoke test (bird / pigeon) — not started
+## Phase 1 — Webcam bird detect (COCO) — done
 
-Quick check with a COCO pretrained nano model (class includes `bird`):
+Verified on this machine (2026-08-09):
 
-```powershell
-yolo predict model=yolov8n.pt source=0 device=cpu conf=0.25 show=True
-```
+- Weights: `data/models/yolov8n.pt` (COCO; class **14** = `bird`)
+- Image smoke: sample bird → **`1 bird`** @ `conf=0.25`, CPU ~108 ms
+- Webcam: 8 frames inferred successfully via OpenCV DSHOW + Ultralytics
+- Reference clone: `vendor/Bird-Detection`
 
-- `source=0` = default webcam  
-- Press `q` in the preview window to quit  
-- Accept: birds/pigeons in frame get boxes (may also fire on other COCO classes)
-
-Optional reference clone (webcam / Flask examples):
+### 1) Get the nano weights
 
 ```powershell
-git clone https://github.com/Aamer-Gituser/Bird-Detection.git vendor/Bird-Detection
+.\.venv\Scripts\Activate.ps1
+python -c "from ultralytics import YOLO; import shutil; YOLO('yolov8n.pt'); shutil.copy2('yolov8n.pt', 'data/models/yolov8n.pt')"
 ```
 
-Swap their weights for a pigeon `.pt` when you have one.
+### 2) Live webcam (bird boxes only)
+
+```powershell
+yolo predict model=data/models/yolov8n.pt source=0 device=cpu conf=0.25 classes=14 show=True
+```
+
+| Parameter | Example | Meaning |
+|-----------|---------|---------|
+| `model` | `data/models/yolov8n.pt` | Path to YOLO weights. Phase 1 uses COCO nano; later swap to `data/models/pigeon.pt`. |
+| `source` | `0` | Input. Webcam index (`0` = first cam, `1` = second, …), or a file/folder path (image/video). |
+| `device` | `cpu` | Inference device. This project uses CPU; use `0` for first CUDA GPU if available. |
+| `conf` | `0.25` | Confidence threshold (0–1). Lower = more boxes (more false positives); higher = stricter. |
+| `classes` | `14` | Only keep these COCO class ids. `14` = `bird`. Omit to show all COCO classes. |
+| `show` | `True` | Open a live preview window. Press `q` to quit. |
+
+Also useful later:
+
+| Parameter | Example | Meaning |
+|-----------|---------|---------|
+| `save` | `True` | Write annotated frames/images under `runs/detect/`. |
+| `imgsz` | `640` | Inference image size (default 640). Smaller can be faster on CPU. |
+
+Accept: birds/pigeons in frame get boxes (still COCO-bird, not pigeon-specific).
+
+### 3) Optional image smoke
+
+```powershell
+yolo predict model=data/models/yolov8n.pt source=data/samples/bird.jpg device=cpu conf=0.25 classes=14 save=True
+```
+
+### Optional reference clone
+
+```powershell
+git clone --depth 1 https://github.com/Aamer-Gituser/Bird-Detection.git vendor/Bird-Detection
+```
+
+Useful entry points there: `webcam_pilot.py`, Flask `app.py`. Swap their weights for a pigeon `.pt` in Phase 2.
 
 ## Phase 2 — Pigeon-specific weights (Roboflow) — not started
 
