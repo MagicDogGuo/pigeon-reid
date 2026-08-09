@@ -97,7 +97,7 @@ def _assert(cond: bool, msg: str) -> None:
 
 
 def _demo() -> None:
-    """Deterministic smoke: start save, interval save, no empty-gap save, new visit."""
+    """Deterministic smoke: start save after confirm, interval save, no empty-gap save, new visit."""
     import shutil
     import tempfile
     from dataclasses import replace
@@ -107,7 +107,7 @@ def _demo() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="pigeon-reid-saver-"))
     try:
         clock = _FakeClock(datetime(2026, 8, 9, 17, 15, 30))
-        cfg = replace(CONFIG, captures_dir=tmp, save_interval_sec=10.0)
+        cfg = replace(CONFIG, captures_dir=tmp, save_interval_sec=10.0, confirm_sec=2.0)
         counter = VisitCounter(cfg, now_fn=clock)
         saver = CaptureSaver(cfg, now_fn=clock)
         frame = np.zeros((48, 64, 3), dtype=np.uint8)
@@ -118,33 +118,48 @@ def _demo() -> None:
 
         s = counter.update(2)
         p = saver.maybe_save(frame, s)
-        _assert(p is not None and p.exists(), "visit start saves")
-        _assert(p.name == "visit001_20260809_171530_n2.jpg", f"name={p.name}")
+        _assert(p is None, "confirming: no save yet")
+
+        clock.now = datetime(2026, 8, 9, 17, 15, 31)
+        s = counter.update(2)
+        p = saver.maybe_save(frame, s)
+        _assert(p is None, "still confirming < 2s")
+
+        clock.now = datetime(2026, 8, 9, 17, 15, 32)
+        s = counter.update(2)
+        p = saver.maybe_save(frame, s)
+        _assert(p is not None and p.exists(), "confirmed visit start saves")
+        _assert(p.name == "visit001_20260809_171532_n2.jpg", f"name={p.name}")
         _assert(p.parent.name == "2026-08-09", "day folder")
 
-        clock.now = datetime(2026, 8, 9, 17, 15, 35)
+        clock.now = datetime(2026, 8, 9, 17, 15, 37)
         s = counter.update(2)
         p = saver.maybe_save(frame, s)
         _assert(p is None, "interval < 10s: no save")
 
-        clock.now = datetime(2026, 8, 9, 17, 15, 40)
+        clock.now = datetime(2026, 8, 9, 17, 15, 42)
         s = counter.update(3)
         p = saver.maybe_save(frame, s)
         _assert(
-            p is not None and p.name == "visit001_20260809_171540_n3.jpg",
+            p is not None and p.name == "visit001_20260809_171542_n3.jpg",
             "interval save same visit",
         )
 
-        clock.now = datetime(2026, 8, 9, 17, 15, 41)
+        clock.now = datetime(2026, 8, 9, 17, 15, 43)
         s = counter.update(0)
         p = saver.maybe_save(frame, s)
         _assert(p is None, "zero gap: no save")
 
-        clock.now = datetime(2026, 8, 9, 17, 16, 11)
+        clock.now = datetime(2026, 8, 9, 17, 16, 13)
         s = counter.update(0)
         _assert(s.visit_ended, "visit ended after gap")
 
-        clock.now = datetime(2026, 8, 9, 17, 16, 12)
+        clock.now = datetime(2026, 8, 9, 17, 16, 14)
+        s = counter.update(1)
+        p = saver.maybe_save(frame, s)
+        _assert(p is None, "new presence confirming")
+
+        clock.now = datetime(2026, 8, 9, 17, 16, 16)
         s = counter.update(1)
         p = saver.maybe_save(frame, s)
         _assert(

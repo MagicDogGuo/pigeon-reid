@@ -193,7 +193,7 @@ Done so far:
 Visit rules (summary):
 
 1. **Concurrent** = YOLO box count on the current frame
-2. **Visit** starts on `0 → N` (**+N** = entry concurrent count); ends after continuous **30s** of zeros; same visit does not add again
+2. **Visit** starts only after continuous presence for **`confirm_sec` (default 2s)** (**+N** = concurrent count at confirm); brief flicker under 2s is ignored; ends after continuous **30s** of zeros; same visit does not add again
 3. Local calendar day rollover resets `visits_today`
 
 Next: **3e** flesh out README start instructions and parameters.

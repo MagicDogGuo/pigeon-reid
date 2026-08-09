@@ -28,8 +28,8 @@ class VisitCounter:
     """Track live box count and daily visit sessions.
 
     Rules:
-    - concurrent_count = current frame box_count
-    - 0 -> N starts a visit and adds N to visits_today
+    - concurrent_count = current frame box_count (live display)
+    - presence must last confirm_sec before a visit starts (+N) and can be saved
     - same visit does not add again (count may change mid-visit)
     - continuous visit_gap_sec of zeros ends the visit
     - local calendar day rollover resets visits_today
@@ -42,10 +42,12 @@ class VisitCounter:
         now_fn: Optional[NowFn] = None,
     ) -> None:
         self._visit_gap_sec = config.visit_gap_sec
+        self._confirm_sec = config.confirm_sec
         self._now_fn = now_fn or datetime.now
         self._visits_today = 0
         self._in_visit = False
         self._zero_since: Optional[datetime] = None
+        self._present_since: Optional[datetime] = None
         self._local_date = self._now_fn().date()
 
     def update(self, box_count: int) -> VisitStats:
@@ -59,6 +61,7 @@ class VisitCounter:
             self._visits_today = 0
             self._in_visit = False
             self._zero_since = None
+            self._present_since = None
 
         visit_started = False
         visit_ended = False
@@ -66,11 +69,20 @@ class VisitCounter:
 
         if box_count >= 1:
             self._zero_since = None
-            if not self._in_visit:
-                self._in_visit = True
-                self._visits_today += box_count
-                visit_started = True
+            if self._in_visit:
+                pass
+            else:
+                if self._present_since is None:
+                    self._present_since = now
+                elif (now - self._present_since) >= timedelta(
+                    seconds=self._confirm_sec
+                ):
+                    self._in_visit = True
+                    self._present_since = None
+                    self._visits_today += box_count
+                    visit_started = True
         else:
+            self._present_since = None
             if self._in_visit:
                 if self._zero_since is None:
                     self._zero_since = now
@@ -107,7 +119,7 @@ def _assert(cond: bool, msg: str) -> None:
 
 
 def _demo() -> None:
-    """Deterministic smoke: enter, stay, leave 30s, re-enter, day rollover."""
+    """Deterministic smoke: confirm 2s, brief FP ignored, leave, re-enter, day rollover."""
     clock = _FakeClock(datetime(2026, 8, 9, 12, 0, 0))
     counter = VisitCounter(CONFIG, now_fn=clock)
 
@@ -116,11 +128,25 @@ def _demo() -> None:
 
     s = counter.update(3)
     _assert(
+        s.visits_today == 0
+        and s.concurrent_count == 3
+        and not s.visit_started
+        and not s.in_visit,
+        "present < confirm_sec: no count yet",
+    )
+
+    clock.now = datetime(2026, 8, 9, 12, 0, 1)
+    s = counter.update(3)
+    _assert(s.visits_today == 0 and not s.in_visit, "still confirming")
+
+    clock.now = datetime(2026, 8, 9, 12, 0, 2)
+    s = counter.update(3)
+    _assert(
         s.visits_today == 3
         and s.concurrent_count == 3
         and s.visit_started
         and s.in_visit,
-        "enter +3 concurrent=3",
+        "confirm >= 2s: enter +3",
     )
 
     s = counter.update(2)
@@ -129,28 +155,40 @@ def _demo() -> None:
     s = counter.update(0)
     _assert(s.in_visit and not s.visit_ended, "zero starts gap timer")
 
-    clock.now = datetime(2026, 8, 9, 12, 0, 29)
+    clock.now = datetime(2026, 8, 9, 12, 0, 31)
     s = counter.update(0)
     _assert(s.in_visit and not s.visit_ended, "gap < 30s still in visit")
 
-    clock.now = datetime(2026, 8, 9, 12, 0, 30)
+    clock.now = datetime(2026, 8, 9, 12, 0, 32)
     s = counter.update(0)
     _assert(not s.in_visit and s.visit_ended and s.visits_today == 3, "gap end")
 
-    clock.now = datetime(2026, 8, 9, 12, 0, 31)
+    # Brief flicker under confirm_sec must not count.
+    clock.now = datetime(2026, 8, 9, 12, 0, 33)
     s = counter.update(1)
-    _assert(s.visits_today == 4 and s.visit_started, "re-enter +1")
+    _assert(s.visits_today == 3 and not s.visit_started, "flicker start")
+    clock.now = datetime(2026, 8, 9, 12, 0, 34)
+    s = counter.update(0)
+    _assert(s.visits_today == 3 and not s.in_visit, "flicker < 2s ignored")
+
+    clock.now = datetime(2026, 8, 9, 12, 0, 35)
+    s = counter.update(1)
+    clock.now = datetime(2026, 8, 9, 12, 0, 37)
+    s = counter.update(1)
+    _assert(s.visits_today == 4 and s.visit_started, "re-enter confirmed +1")
 
     clock.now = datetime(2026, 8, 10, 0, 0, 1)
     s = counter.update(0)
     _assert(s.visits_today == 0 and not s.in_visit, "local day rollover")
 
     s = counter.update(1)
+    clock.now = datetime(2026, 8, 10, 0, 0, 3)
+    s = counter.update(1)
     _assert(s.visits_today == 1 and s.visit_started, "new day first visit")
 
     print("counter smoke OK")
     print(
-        f"visit_gap_sec={CONFIG.visit_gap_sec} "
+        f"confirm_sec={CONFIG.confirm_sec} visit_gap_sec={CONFIG.visit_gap_sec} "
         f"final visits_today={s.visits_today} concurrent={s.concurrent_count}"
     )
 

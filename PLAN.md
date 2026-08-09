@@ -87,7 +87,7 @@ pigeon-reid/
   .venv/           # 本機 venv（gitignore）
   vendor/          # 可選：clone 進來的參考 repo
   app/             # Phase 3：薄 Flask 應用（非大型 package）
-    config.py      # 路徑、conf、visit_gap_sec、save_interval_sec
+    config.py      # 路徑、conf、confirm_sec、visit_gap_sec、save_interval_sec
     detector.py
     counter.py
     saver.py
@@ -227,7 +227,8 @@ Phase 3：新增薄 `app/`（設定集中 `config.py` 注入），**不用 React
 
 1. **同時隻數（live）**：當前幀 YOLO 框數；畫面上 3 隻就顯示 **3**
 2. **今日造訪次數（visit）**：
-   - `0 → N`：開始一次造訪，今日計數 **+N**（進場當幀同時隻數）
+   - 連續偵測有鴿達 **`confirm_sec`（預設 2s）** 後才開始造訪，今日計數 **+N**（確認當幀同時隻數）
+   - 未滿 2s 就消失：不計數、不存檔（壓短暫誤報）
    - 連續 **N 秒**（預設 30s）偵測為 0：結束造訪
    - 同一造訪期間不重複加計（中途隻數增減不加）
 3. **不認個體**（那是 Phase 4）；今日數字是「各波進場同時隻數加總」，不是經 Re-ID 的個體數
@@ -241,8 +242,8 @@ Webcam → Detector → Counter → Flask UI
 ```
 
 - **Detector**：OpenCV DSHOW `source=0` + `data/models/pigeon.pt`（`conf=0.45`, CPU）
-- **Counter**：同時隻數 + 造訪狀態機 + 依本機本地日切換
-- **Saver**：造訪開始必存一張；造訪中每 M 秒（預設 10s）最多再存一張
+- **Counter**：同時隻數 + 造訪狀態機（`confirm_sec` 確認後才計次）+ 依本機本地日切換
+- **Saver**：造訪開始（確認後）必存一張；造訪中每 M 秒（預設 10s）最多再存一張
 - **Flask UI**：MJPEG、今日造訪、當前同時隻數、最近存檔縮圖
 
 存檔範例：`data/captures/2026-08-09/visit003_20260809_171530_n2.jpg`
@@ -276,9 +277,9 @@ Webcam → Detector → Counter → Flask UI
 | --- | --- |
 | 檔案 | `app/counter.py`（`VisitCounter` / `VisitStats`） |
 | API | `VisitCounter(config, now_fn=…).update(box_count) → VisitStats` |
-| 規則 | `0→N` 開始造訪 **+N**；同造訪不重複；連續 `visit_gap_sec`（預設 30）為 0 結束；本機本地日切換重設 |
-| 注入 | `visit_gap_sec` 來自 `AppConfig`；可注入 `now_fn` 做確定性測試 |
-| 煙霧 | `python -m app.counter` → 進畫面 3 隻 +3、同造訪不加成、+29s 仍在訪、+30s 結束、再進 1 隻 +1、跨日歸零 → **OK** |
+| 規則 | 連續有鴿達 `confirm_sec`（預設 2）才開始造訪 **+N**；未滿則忽略；同造訪不重複；連續 `visit_gap_sec`（預設 30）為 0 結束；本機本地日切換重設 |
+| 注入 | `visit_gap_sec` / `confirm_sec` 來自 `AppConfig`；可注入 `now_fn` 做確定性測試 |
+| 煙霧 | `python -m app.counter` → <2s 不計、≥2s +3、短暫 flicker 忽略、離開 30s 再進再加、跨日歸零 → **OK** |
 
 #### 3c 實作記錄
 
