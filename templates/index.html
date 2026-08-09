@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pigeon Monitor</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <header class="top">
+    <h1>Pigeon Monitor</h1>
+    <p class="sub">Local webcam · YOLO pigeon detection · visit counter</p>
+  </header>
+
+  <main class="layout">
+    <section class="live" aria-label="Live video">
+      <img
+        id="video"
+        src="{{ url_for('video_feed') }}"
+        alt="Live annotated webcam stream"
+      />
+      <p id="status" class="status" aria-live="polite">Connecting…</p>
+    </section>
+
+    <aside class="panel" aria-label="Stats">
+      <div class="stat">
+        <span class="label">Visits today</span>
+        <span id="visits" class="value">—</span>
+      </div>
+      <div class="stat">
+        <span class="label">Concurrent</span>
+        <span id="concurrent" class="value">—</span>
+      </div>
+      <div class="stat">
+        <span class="label">In visit</span>
+        <span id="in-visit" class="value">—</span>
+      </div>
+      <div class="stat">
+        <span class="label">Local date</span>
+        <span id="local-date" class="value small">—</span>
+      </div>
+    </aside>
+  </main>
+
+  <section class="recent" aria-label="Recent captures">
+    <h2>Recent captures</h2>
+    <div id="thumbs" class="thumbs"></div>
+  </section>
+
+  <script>
+    const visitsEl = document.getElementById("visits");
+    const concurrentEl = document.getElementById("concurrent");
+    const inVisitEl = document.getElementById("in-visit");
+    const localDateEl = document.getElementById("local-date");
+    const statusEl = document.getElementById("status");
+    const thumbsEl = document.getElementById("thumbs");
+
+    async function refreshStats() {
+      try {
+        const res = await fetch("/api/stats", { cache: "no-store" });
+        if (!res.ok) throw new Error("stats HTTP " + res.status);
+        const data = await res.json();
+
+        visitsEl.textContent = String(data.visits_today);
+        concurrentEl.textContent = String(data.concurrent_count);
+        inVisitEl.textContent = data.in_visit ? "yes" : "no";
+        localDateEl.textContent = data.local_date || "—";
+
+        if (data.error) {
+          statusEl.textContent = data.error;
+          statusEl.classList.add("err");
+        } else if (!data.has_frame) {
+          statusEl.textContent = "Waiting for first frame…";
+          statusEl.classList.remove("err");
+        } else {
+          statusEl.textContent = "Live";
+          statusEl.classList.remove("err");
+        }
+
+        thumbsEl.replaceChildren();
+        for (const rel of data.recent || []) {
+          const a = document.createElement("a");
+          a.href = "/captures/" + rel;
+          a.target = "_blank";
+          a.rel = "noopener";
+          const img = document.createElement("img");
+          img.src = "/captures/" + rel;
+          img.alt = rel;
+          img.loading = "lazy";
+          a.appendChild(img);
+          thumbsEl.appendChild(a);
+        }
+      } catch (err) {
+        statusEl.textContent = "Stats poll failed";
+        statusEl.classList.add("err");
+      }
+    }
+
+    refreshStats();
+    setInterval(refreshStats, 1000);
+  </script>
+</body>
+</html>

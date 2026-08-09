@@ -7,7 +7,7 @@ Local **CPU** pigeon detection with webcam, built from existing tools (not a cus
 | Environment | **Phase 0 done** (2026-08-09) | Python 3.10 venv, CPU torch, ultralytics, opencv |
 | Detect bird (COCO) | **Phase 1 done** (2026-08-09) | `yolov8n.pt` + webcam `source=0` |
 | Detect pigeon | **Phase 2 done** (2026-08-09) | `pigeon.pt` (1-class Roboflow fine-tune) + webcam |
-| Local monitor (Flask) | **Phase 3 in progress** (3c done) | detector + counter + saver → next: Flask UI |
+| Local monitor (Flask) | **Phase 3 in progress** (3d done) | Flask UI live → next: README (3e) |
 | Same-bird Re-ID | Deferred (Phase 4) | wildlife-tools / MegaDescriptor later |
 
 See [PLAN.md](PLAN.md) for the full plan and implementation notes.
@@ -179,7 +179,7 @@ Notes:
 - Some non-pigeon images can still get false positives at low `conf`; raise the threshold if needed.
 - CPU FPS stays modest (same as Phase 1).
 
-## Phase 3 — Local Flask monitor — in progress (3b done)
+## Phase 3 — Local Flask monitor — in progress (3d done)
 
 Goal: browser live view + **visits today** + **concurrent count** + auto-save photos. See [PLAN.md](PLAN.md) Phase 3 for full rules and 3a–3e checklist.
 
@@ -187,6 +187,8 @@ Done so far:
 
 - **3a** `app/detector.py` — webcam + `pigeon.pt` (no UI): `python -m app.detector`
 - **3b** `app/counter.py` — visit state machine (`visit_gap_sec=30`): `python -m app.counter`
+- **3c** `app/saver.py` — auto-save under `data/captures/YYYY-MM-DD/`
+- **3d** `app/web.py` — Flask UI: `python -m app.web` → http://127.0.0.1:5000
 
 Visit rules (summary):
 
@@ -194,7 +196,7 @@ Visit rules (summary):
 2. **Visit** starts on `0 → N` (**+N** = entry concurrent count); ends after continuous **30s** of zeros; same visit does not add again
 3. Local calendar day rollover resets `visits_today`
 
-Next: **3c** saver → `data/captures/YYYY-MM-DD/`, then Flask UI (**3d**).
+Next: **3e** flesh out README start instructions and parameters.
 
 ## Phase 4 — Same individual (deferred) — not started
 

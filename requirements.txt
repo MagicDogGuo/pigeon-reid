@@ -3,3 +3,4 @@
 # Then:
 ultralytics
 opencv-python
+flask
