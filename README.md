@@ -7,7 +7,8 @@ Local **CPU** pigeon detection with webcam, built from existing tools (not a cus
 | Environment | **Phase 0 done** (2026-08-09) | Python 3.10 venv, CPU torch, ultralytics, opencv |
 | Detect bird (COCO) | **Phase 1 done** (2026-08-09) | `yolov8n.pt` + webcam `source=0` |
 | Detect pigeon | **Phase 2 done** (2026-08-09) | `pigeon.pt` (1-class Roboflow fine-tune) + webcam |
-| Same-bird Re-ID | Deferred | wildlife-tools / MegaDescriptor later |
+| Local monitor (Flask) | **Phase 3 in progress** (3b done) | `app/detector.py` + `app/counter.py` → next: saver / Flask UI |
+| Same-bird Re-ID | Deferred (Phase 4) | wildlife-tools / MegaDescriptor later |
 
 See [PLAN.md](PLAN.md) for the full plan and implementation notes.
 
@@ -17,9 +18,14 @@ See [PLAN.md](PLAN.md) for the full plan and implementation notes.
 pigeon-reid/
   .venv/            # local venv (gitignored)
   vendor/           # optional cloned reference repos (gitignored contents)
+  app/              # Phase 3 thin Flask app (in progress)
+    config.py
+    detector.py     # 3a done
+    counter.py      # 3b done
   data/models/      # YOLO weights (.pt, gitignored)
-  data/gallery/     # reserved for Phase 3
+  data/gallery/     # reserved for Phase 4 Re-ID
   data/samples/     # local smoke-test images (gitignored)
+  data/captures/    # Phase 3c auto-saves (gitignored)
   requirements.txt
   README.md
   PLAN.md
@@ -172,7 +178,24 @@ Notes:
 - Some non-pigeon images can still get false positives at low `conf`; raise the threshold if needed.
 - CPU FPS stays modest (same as Phase 1).
 
-## Phase 3 — Same individual (deferred) — not started
+## Phase 3 — Local Flask monitor — in progress (3b done)
+
+Goal: browser live view + **visits today** + **concurrent count** + auto-save photos. See [PLAN.md](PLAN.md) Phase 3 for full rules and 3a–3e checklist.
+
+Done so far:
+
+- **3a** `app/detector.py` — webcam + `pigeon.pt` (no UI): `python -m app.detector`
+- **3b** `app/counter.py` — visit state machine (`visit_gap_sec=30`): `python -m app.counter`
+
+Visit rules (summary):
+
+1. **Concurrent** = YOLO box count on the current frame
+2. **Visit** starts on `0 → N` (**+N** = entry concurrent count); ends after continuous **30s** of zeros; same visit does not add again
+3. Local calendar day rollover resets `visits_today`
+
+Next: **3c** saver → `data/captures/YYYY-MM-DD/`, then Flask UI (**3d**).
+
+## Phase 4 — Same individual (deferred) — not started
 
 Not in scope yet. Later: crop detections → MegaDescriptor / [wildlife-tools](https://github.com/WildlifeDatasets/wildlife-tools) → compare to `data/gallery/<id>/`.
 

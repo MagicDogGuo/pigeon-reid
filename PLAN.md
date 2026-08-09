@@ -2,7 +2,7 @@
 
 目標路徑：`D:\_myproject_WebsitePorjects\pigeon-reid`  
 環境：**CPU**  
-進度：**Phase 3a 完成**（2026-08-09）→ 下一步 **3b**（`counter.py` 造訪狀態機）
+進度：**Phase 3b 完成**（2026-08-09）→ 下一步 **3c**（`saver.py` 自動存照）
 
 ---
 
@@ -213,7 +213,7 @@ Phase 3：新增薄 `app/`（設定集中 `config.py` 注入），**不用 React
 
 可選後續：用自家 Roboflow API key 下載 Universe 資料集再 `yolo detect train`，覆蓋 `pigeon.pt`。見 [README.md](README.md) Phase 2。
 
-### Phase 3 — 本機網頁監控（Flask）— **進行中（3a 完成）**
+### Phase 3 — 本機網頁監控（Flask）— **進行中（3b 完成）**
 
 目標：瀏覽器看即時畫面，顯示**今日造訪次數**與**目前同時隻數**，並在偵測到鴿子時自動拍照存資料夾。
 
@@ -227,10 +227,10 @@ Phase 3：新增薄 `app/`（設定集中 `config.py` 注入），**不用 React
 
 1. **同時隻數（live）**：當前幀 YOLO 框數；畫面上 3 隻就顯示 **3**
 2. **今日造訪次數（visit）**：
-   - `0 → ≥1`：開始一次造訪，今日計數 **+1**
+   - `0 → N`：開始一次造訪，今日計數 **+N**（進場當幀同時隻數）
    - 連續 **N 秒**（預設 30s）偵測為 0：結束造訪
-   - 同一造訪期間不重複加計
-3. **不認個體**（那是 Phase 4）；今日數字是「造訪次數」，不是「幾隻不同的鴿」
+   - 同一造訪期間不重複加計（中途隻數增減不加）
+3. **不認個體**（那是 Phase 4）；今日數字是「各波進場同時隻數加總」，不是經 Re-ID 的個體數
 
 #### 資料流
 
@@ -252,7 +252,7 @@ Webcam → Detector → Counter → Flask UI
 | 小階段 | 內容 | 驗收 |
 | --- | --- | --- |
 | **3a** | `detector.py`：webcam + `pigeon.pt` 迴路（無 UI） | **完成**（2026-08-09）：有鴿 `boxes >= 1`，無鴿為 0 |
-| **3b** | `counter.py`：`concurrent_count`、`visits_today`、gap=30s | 進畫面 +1；同造訪不重複；離開 30s 再進再 +1；同時 3 顯示 3 |
+| **3b** | `counter.py`：`concurrent_count`、`visits_today`、gap=30s | **完成**（2026-08-09）：`0→N` 則 +N；同造訪不重複；離開 30s 再進再加；同時 3 顯示 3 |
 | **3c** | `saver.py` → `data/captures/YYYY-MM-DD/`；gitignore | 造訪後有 JPEG；檔名含時間與隻數 |
 | **3d** | Flask：`/`、`/video_feed`、`/api/stats`；`requirements.txt` 加 flask | `http://127.0.0.1:5000` 可看流與數字 |
 | **3e** | 更新 README 啟動指令與參數；入口 `python -m app.web` | 文件可照做跑起來 |
@@ -268,6 +268,17 @@ Webcam → Detector → Counter → Flask UI
 | Webcam | DSHOW `source=0`，連續 8 幀推論成功（`480×640×3`，現場無鴿 → boxes=0） |
 | 無 UI 迴路 | `python -m app.detector`（Ctrl+C 結束） |
 | 已知限制 | 非鴿圖（如 `person.jpg`）在 `conf=0.45` 仍可能有 FP（同 Phase 2） |
+
+#### 3b 實作記錄
+
+
+| 項目 | 結果 |
+| --- | --- |
+| 檔案 | `app/counter.py`（`VisitCounter` / `VisitStats`） |
+| API | `VisitCounter(config, now_fn=…).update(box_count) → VisitStats` |
+| 規則 | `0→N` 開始造訪 **+N**；同造訪不重複；連續 `visit_gap_sec`（預設 30）為 0 結束；本機本地日切換重設 |
+| 注入 | `visit_gap_sec` 來自 `AppConfig`；可注入 `now_fn` 做確定性測試 |
+| 煙霧 | `python -m app.counter` → 進畫面 3 隻 +3、同造訪不加成、+29s 仍在訪、+30s 結束、再進 1 隻 +1、跨日歸零 → **OK** |
 
 #### Phase 3 刻意不做
 
@@ -311,7 +322,7 @@ Webcam → Detector → Counter → Flask UI
 | 偵測 + webcam    | 高，現成很多                |
 | CPU 即時 FPS     | 偏低（數 FPS～十來 FPS）      |
 | 本機 Flask 監控頁   | 高；MJPEG + 計數狀態機可落地     |
-| 造訪次數 ≠ 個體數     | 預期內；真正認隻要等 Phase 4     |
+| 造訪次數 ≠ 經 Re-ID 個體數 | 預期內；現為進場同時隻數加總；真正認隻要等 Phase 4 |
 | 少樣本同一隻         | 中；角度／光線差會誤判，需多角度照片    |
 | 單一 GitHub 全包三點 | **幾乎沒有**，要組 2～3 個現成專案 |
 
