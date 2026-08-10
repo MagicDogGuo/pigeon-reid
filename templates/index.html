@@ -274,8 +274,12 @@
           statusEl.classList.remove("err");
         } else {
           const modelLabel = modelLabels[data.model_id] || data.model_id;
+          const sizeTxt =
+            data.frame_width && data.frame_height
+              ? " · " + data.frame_width + "x" + data.frame_height
+              : "";
           statusEl.textContent =
-            "Live · camera " + data.camera_index + " · " + modelLabel;
+            "Live · camera " + data.camera_index + " · " + modelLabel + sizeTxt;
           statusEl.classList.remove("err");
         }
 

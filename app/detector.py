@@ -33,10 +33,16 @@ class Detector:
         self._classes = config.classes
         self._model = YOLO(str(config.model_path))
         self._cap: Optional[cv2.VideoCapture] = None
+        self._frame_size: Optional[tuple[int, int]] = None
 
     @property
     def camera_index(self) -> int:
         return self._camera_index
+
+    @property
+    def frame_size(self) -> Optional[tuple[int, int]]:
+        """Actual capture size as (width, height), or None if not open."""
+        return self._frame_size
 
     @property
     def model_path(self) -> Path:
@@ -59,14 +65,23 @@ class Detector:
             raise RuntimeError(
                 f"Failed to open webcam index {self._camera_index}"
             )
+        width = self._config.camera_width
+        height = self._config.camera_height
+        if width > 0 and height > 0:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         for _ in range(self._config.camera_warmup_frames):
             cap.read()
+        actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self._frame_size = (actual_w, actual_h) if actual_w > 0 and actual_h > 0 else None
         self._cap = cap
 
     def close(self) -> None:
         if self._cap is not None:
             self._cap.release()
             self._cap = None
+        self._frame_size = None
 
     def switch_camera(self, camera_index: int) -> None:
         """Close current capture (if any) and open a different camera index."""
@@ -179,7 +194,8 @@ def main() -> None:
     """No-UI loop: print box_count each frame. Ctrl+C to stop."""
     print(
         f"model={CONFIG.model_path} conf={CONFIG.conf} "
-        f"device={CONFIG.device} camera={CONFIG.camera_index}"
+        f"device={CONFIG.device} camera={CONFIG.camera_index} "
+        f"size={CONFIG.camera_width}x{CONFIG.camera_height}"
     )
     detector = Detector(CONFIG)
     try:

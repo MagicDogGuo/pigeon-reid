@@ -38,6 +38,8 @@ class MonitorSnapshot:
     error: Optional[str]
     camera_index: int
     model_id: str
+    frame_width: Optional[int]
+    frame_height: Optional[int]
     switching: bool
 
 
@@ -53,6 +55,8 @@ class MonitorRuntime:
         self._error: Optional[str] = None
         self._camera_index = config.camera_index
         self._model_id = config.model_id
+        self._frame_width: Optional[int] = None
+        self._frame_height: Optional[int] = None
         self._switch_to: Optional[int] = None
         self._switch_model_to: Optional[str] = None
         self._switching = False
@@ -132,6 +136,8 @@ class MonitorRuntime:
                 error=self._error,
                 camera_index=self._camera_index,
                 model_id=self._model_id,
+                frame_width=self._frame_width,
+                frame_height=self._frame_height,
                 switching=self._switching,
             )
 
@@ -178,6 +184,15 @@ class MonitorRuntime:
     def _relative_capture(self, path: Path) -> str:
         return path.relative_to(self._config.captures_dir).as_posix()
 
+    def _sync_frame_size(self, detector: Detector) -> None:
+        size = detector.frame_size
+        with self._lock:
+            if size is None:
+                self._frame_width = None
+                self._frame_height = None
+            else:
+                self._frame_width, self._frame_height = size
+
     def _apply_pending_switch(self, detector: Detector) -> None:
         with self._lock:
             target = self._switch_to
@@ -186,12 +201,16 @@ class MonitorRuntime:
             return
         try:
             detector.switch_camera(target)
+            self._sync_frame_size(detector)
             with self._lock:
                 self._camera_index = detector.camera_index
                 self._jpeg_bytes = None
-                self._error = f"switched to camera {detector.camera_index}"
+                size = detector.frame_size
+                size_txt = f" {size[0]}x{size[1]}" if size else ""
+                self._error = f"switched to camera {detector.camera_index}{size_txt}"
                 self._switching = False
         except Exception as exc:  # noqa: BLE001 — surface to UI
+            self._sync_frame_size(detector)
             with self._lock:
                 self._camera_index = detector.camera_index
                 self._switching = False
@@ -222,6 +241,7 @@ class MonitorRuntime:
         saver = CaptureSaver(self._config)
         try:
             detector.open()
+            self._sync_frame_size(detector)
             with self._lock:
                 self._camera_index = detector.camera_index
                 self._model_id = self._config.model_id
@@ -303,6 +323,8 @@ def create_app(
             "has_frame": snap.jpeg_bytes is not None,
             "camera_index": snap.camera_index,
             "model_id": snap.model_id,
+            "frame_width": snap.frame_width,
+            "frame_height": snap.frame_height,
             "switching": snap.switching,
         }
         return jsonify(payload)
@@ -379,7 +401,8 @@ def main() -> None:
     print(
         f"pigeon monitor → http://127.0.0.1:5000 "
         f"model={CONFIG.model_id} ({CONFIG.model_path.name}) conf={CONFIG.conf} "
-        f"camera={CONFIG.camera_index}"
+        f"camera={CONFIG.camera_index} "
+        f"size={CONFIG.camera_width}x{CONFIG.camera_height}"
     )
     # threaded=True: MJPEG + /api/stats while the worker holds the camera.
     # use_reloader=False: avoid opening the webcam twice.

@@ -55,6 +55,8 @@ class AppConfig:
     conf: float
     classes: Optional[tuple[int, ...]]
     camera_index: int
+    camera_width: int
+    camera_height: int
     device: str
     visit_gap_sec: float
     confirm_sec: float
@@ -72,6 +74,8 @@ CONFIG = AppConfig(
     conf=_DEFAULT_PRESET.conf,
     classes=_DEFAULT_PRESET.classes,
     camera_index=0,
+    camera_width=1280,
+    camera_height=720,
     device="cpu",
     visit_gap_sec=30.0,
     confirm_sec=2.0,
