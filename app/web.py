@@ -12,7 +12,13 @@ from typing import Deque, Generator, Optional
 import cv2
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 
-from app.config import AppConfig, CONFIG, ROOT_DIR
+from app.config import (
+    MODEL_PRESETS,
+    AppConfig,
+    CONFIG,
+    ROOT_DIR,
+    get_model_preset,
+)
 from app.counter import VisitCounter, VisitStats
 from app.detector import Detector, list_camera_indices
 from app.saver import CaptureSaver
@@ -31,6 +37,7 @@ class MonitorSnapshot:
     recent: list[str]
     error: Optional[str]
     camera_index: int
+    model_id: str
     switching: bool
 
 
@@ -45,7 +52,9 @@ class MonitorRuntime:
         self._recent: Deque[str] = deque(maxlen=RECENT_CAPTURE_LIMIT)
         self._error: Optional[str] = None
         self._camera_index = config.camera_index
+        self._model_id = config.model_id
         self._switch_to: Optional[int] = None
+        self._switch_model_to: Optional[str] = None
         self._switching = False
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -54,6 +63,11 @@ class MonitorRuntime:
     def camera_index(self) -> int:
         with self._lock:
             return self._camera_index
+
+    @property
+    def model_id(self) -> str:
+        with self._lock:
+            return self._model_id
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -84,8 +98,30 @@ class MonitorRuntime:
             self._error = f"switching to camera {camera_index}…"
         return camera_index
 
+    def request_model(self, model_id: str) -> str:
+        """Ask the worker to switch YOLO model; returns the requested id."""
+        preset = get_model_preset(model_id)
+        with self._lock:
+            if model_id == self._model_id and not self._switching:
+                return model_id
+            self._switch_model_to = preset.id
+            self._switching = True
+            self._error = f"switching to model {preset.label}…"
+        return preset.id
+
     def list_cameras(self) -> list[int]:
         return list_camera_indices(self._config.camera_probe_max)
+
+    def list_models(self) -> list[dict]:
+        return [
+            {
+                "id": preset.id,
+                "label": preset.label,
+                "conf": preset.conf,
+                "classes": None if preset.classes is None else list(preset.classes),
+            }
+            for preset in MODEL_PRESETS.values()
+        ]
 
     def snapshot(self) -> MonitorSnapshot:
         with self._lock:
@@ -95,6 +131,7 @@ class MonitorRuntime:
                 recent=list(self._recent),
                 error=self._error,
                 camera_index=self._camera_index,
+                model_id=self._model_id,
                 switching=self._switching,
             )
 
@@ -160,6 +197,25 @@ class MonitorRuntime:
                 self._switching = False
                 self._error = f"camera switch failed: {exc}"
 
+    def _apply_pending_model(self, detector: Detector) -> None:
+        with self._lock:
+            target = self._switch_model_to
+            self._switch_model_to = None
+        if target is None:
+            return
+        try:
+            preset = get_model_preset(target)
+            detector.switch_model(preset.path, preset.conf, preset.classes)
+            with self._lock:
+                self._model_id = preset.id
+                self._jpeg_bytes = None
+                self._error = f"switched to model {preset.label}"
+                self._switching = False
+        except Exception as exc:  # noqa: BLE001 — surface to UI
+            with self._lock:
+                self._switching = False
+                self._error = f"model switch failed: {exc}"
+
     def _run_loop(self) -> None:
         detector = Detector(self._config)
         counter = VisitCounter(self._config)
@@ -168,6 +224,7 @@ class MonitorRuntime:
             detector.open()
             with self._lock:
                 self._camera_index = detector.camera_index
+                self._model_id = self._config.model_id
         except Exception as exc:  # noqa: BLE001 — surface to UI
             self._set_error(f"camera open failed: {exc}")
             return
@@ -175,6 +232,7 @@ class MonitorRuntime:
         try:
             while not self._stop.is_set():
                 self._apply_pending_switch(detector)
+                self._apply_pending_model(detector)
 
                 detection = detector.read()
                 if detection is None:
@@ -244,6 +302,7 @@ def create_app(
             "error": snap.error,
             "has_frame": snap.jpeg_bytes is not None,
             "camera_index": snap.camera_index,
+            "model_id": snap.model_id,
             "switching": snap.switching,
         }
         return jsonify(payload)
@@ -272,6 +331,33 @@ def create_app(
         requested = monitor.request_camera(index)
         return jsonify({"ok": True, "requested": requested, "current": monitor.camera_index})
 
+    @app.route("/api/models")
+    def api_models():
+        return jsonify(
+            {
+                "models": monitor.list_models(),
+                "current": monitor.model_id,
+            }
+        )
+
+    @app.route("/api/model", methods=["POST"])
+    def api_model():
+        body = request.get_json(silent=True) or {}
+        raw = body.get("id", body.get("model_id"))
+        if not isinstance(raw, str) or not raw.strip():
+            return jsonify({"ok": False, "error": "id must be a non-empty string"}), 400
+        model_id = raw.strip()
+        if model_id not in MODEL_PRESETS:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": f"unknown model id: {model_id}",
+                    "known": sorted(MODEL_PRESETS),
+                }
+            ), 400
+        requested = monitor.request_model(model_id)
+        return jsonify({"ok": True, "requested": requested, "current": monitor.model_id})
+
     @app.route("/captures/<path:rel_path>")
     def serve_capture(rel_path: str):
         captures_dir = cfg.captures_dir.resolve()
@@ -292,7 +378,7 @@ def main() -> None:
     app = create_app(CONFIG)
     print(
         f"pigeon monitor → http://127.0.0.1:5000 "
-        f"model={CONFIG.model_path.name} conf={CONFIG.conf} "
+        f"model={CONFIG.model_id} ({CONFIG.model_path.name}) conf={CONFIG.conf} "
         f"camera={CONFIG.camera_index}"
     )
     # threaded=True: MJPEG + /api/stats while the worker holds the camera.

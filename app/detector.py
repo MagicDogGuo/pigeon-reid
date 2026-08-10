@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Generator, Optional
 
 import cv2
@@ -22,17 +23,32 @@ class DetectionFrame:
 
 
 class Detector:
-    """OpenCV webcam + Ultralytics YOLO pigeon detection loop."""
+    """OpenCV webcam + Ultralytics YOLO detection loop."""
 
     def __init__(self, config: AppConfig) -> None:
         self._config = config
         self._camera_index = config.camera_index
+        self._model_path = config.model_path
+        self._conf = config.conf
+        self._classes = config.classes
         self._model = YOLO(str(config.model_path))
         self._cap: Optional[cv2.VideoCapture] = None
 
     @property
     def camera_index(self) -> int:
         return self._camera_index
+
+    @property
+    def model_path(self) -> Path:
+        return self._model_path
+
+    @property
+    def conf(self) -> float:
+        return self._conf
+
+    @property
+    def classes(self) -> Optional[tuple[int, ...]]:
+        return self._classes
 
     def open(self) -> None:
         if self._cap is not None and self._cap.isOpened():
@@ -75,13 +91,43 @@ class Detector:
                 pass
             raise
 
+    def switch_model(
+        self,
+        path: Path,
+        conf: float,
+        classes: Optional[tuple[int, ...]],
+    ) -> None:
+        """Load a different YOLO weights file and detection filters."""
+        if not path.is_file():
+            raise FileNotFoundError(f"model weights not found: {path}")
+        if conf <= 0 or conf > 1:
+            raise ValueError(f"conf must be in (0, 1], got {conf}")
+        previous_path = self._model_path
+        previous_conf = self._conf
+        previous_classes = self._classes
+        previous_model = self._model
+        try:
+            self._model = YOLO(str(path))
+            self._model_path = path
+            self._conf = conf
+            self._classes = classes
+        except Exception:
+            self._model = previous_model
+            self._model_path = previous_path
+            self._conf = previous_conf
+            self._classes = previous_classes
+            raise
+
     def predict_frame(self, frame: np.ndarray) -> DetectionFrame:
-        result = self._model.predict(
-            source=frame,
-            device=self._config.device,
-            conf=self._config.conf,
-            verbose=False,
-        )[0]
+        predict_kwargs = {
+            "source": frame,
+            "device": self._config.device,
+            "conf": self._conf,
+            "verbose": False,
+        }
+        if self._classes is not None:
+            predict_kwargs["classes"] = list(self._classes)
+        result = self._model.predict(**predict_kwargs)[0]
         boxes = result.boxes
         box_count = 0 if boxes is None else len(boxes)
         annotated = result.plot()

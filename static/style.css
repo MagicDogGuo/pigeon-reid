@@ -60,11 +60,15 @@ body {
   border: 1px solid var(--line);
 }
 
-.camera-label {
+.toolbar-label {
   color: var(--muted);
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+.toolbar-label:not(:first-child) {
+  margin-left: 0.35rem;
 }
 
 .toolbar select,
@@ -79,6 +83,10 @@ body {
 
 .toolbar select {
   min-width: 8.5rem;
+}
+
+#model-select {
+  min-width: 11rem;
 }
 
 .toolbar button {

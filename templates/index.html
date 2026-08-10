@@ -9,13 +9,13 @@
 <body>
   <header class="top">
     <h1>Pigeon Monitor</h1>
-    <p class="sub">Local webcam · YOLO pigeon detection · visit counter</p>
+    <p class="sub">Local webcam · YOLO detection · visit counter</p>
   </header>
 
   <main class="layout">
     <section class="live" aria-label="Live video">
       <div class="toolbar">
-        <label class="camera-label" for="camera-select">Camera</label>
+        <label class="toolbar-label" for="camera-select">Camera</label>
         <select id="camera-select" aria-label="Camera index">
           <option value="0">Camera 0</option>
           <option value="1">Camera 1</option>
@@ -25,6 +25,12 @@
           <option value="5">Camera 5</option>
         </select>
         <button id="camera-refresh" type="button" title="Reload camera list">Reload</button>
+
+        <label class="toolbar-label" for="model-select">Model</label>
+        <select id="model-select" aria-label="Detection model">
+          <option value="pigeon">Pigeon</option>
+          <option value="bird">Bird (COCO YOLO)</option>
+        </select>
       </div>
       <img
         id="video"
@@ -48,6 +54,10 @@
         <span id="in-visit" class="value">—</span>
       </div>
       <div class="stat">
+        <span class="label">Model</span>
+        <span id="model-name" class="value small">—</span>
+      </div>
+      <div class="stat">
         <span class="label">Local date</span>
         <span id="local-date" class="value small">—</span>
       </div>
@@ -63,14 +73,19 @@
     const visitsEl = document.getElementById("visits");
     const concurrentEl = document.getElementById("concurrent");
     const inVisitEl = document.getElementById("in-visit");
+    const modelNameEl = document.getElementById("model-name");
     const localDateEl = document.getElementById("local-date");
     const statusEl = document.getElementById("status");
     const thumbsEl = document.getElementById("thumbs");
     const cameraSelect = document.getElementById("camera-select");
     const cameraRefresh = document.getElementById("camera-refresh");
+    const modelSelect = document.getElementById("model-select");
 
     let cameraBusy = false;
+    let modelBusy = false;
     let lastCameraIndex = null;
+    let lastModelId = null;
+    const modelLabels = {};
 
     function fillCameraSelect(cameras, current) {
       const values = Array.from(new Set([...(cameras || []), current]))
@@ -94,11 +109,39 @@
       lastCameraIndex = current;
     }
 
+    function fillModelSelect(models, current) {
+      modelSelect.replaceChildren();
+      for (const m of models || []) {
+        modelLabels[m.id] = m.label;
+        const opt = document.createElement("option");
+        opt.value = m.id;
+        opt.textContent = m.label;
+        if (m.id === current) opt.selected = true;
+        modelSelect.appendChild(opt);
+      }
+      if (!modelSelect.options.length) {
+        const opt = document.createElement("option");
+        opt.value = current || "pigeon";
+        opt.textContent = modelLabels[opt.value] || opt.value;
+        opt.selected = true;
+        modelSelect.appendChild(opt);
+      }
+      lastModelId = current;
+      modelNameEl.textContent = modelLabels[current] || current || "—";
+    }
+
     async function loadCameras() {
       const res = await fetch("/api/cameras", { cache: "no-store" });
       if (!res.ok) throw new Error("cameras HTTP " + res.status);
       const data = await res.json();
       fillCameraSelect(data.cameras || [], data.current);
+    }
+
+    async function loadModels() {
+      const res = await fetch("/api/models", { cache: "no-store" });
+      if (!res.ok) throw new Error("models HTTP " + res.status);
+      const data = await res.json();
+      fillModelSelect(data.models || [], data.current);
     }
 
     async function switchCamera(index) {
@@ -130,8 +173,40 @@
       }
     }
 
+    async function switchModel(modelId) {
+      if (modelBusy) return;
+      modelBusy = true;
+      modelSelect.disabled = true;
+      statusEl.textContent = "Switching to model " + (modelLabels[modelId] || modelId) + "…";
+      statusEl.classList.remove("err");
+      try {
+        const res = await fetch("/api/model", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: modelId }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || ("model HTTP " + res.status));
+        }
+        lastModelId = modelId;
+        modelNameEl.textContent = modelLabels[modelId] || modelId;
+      } catch (err) {
+        statusEl.textContent = "Model switch failed";
+        statusEl.classList.add("err");
+        if (lastModelId !== null) modelSelect.value = lastModelId;
+      } finally {
+        modelBusy = false;
+        modelSelect.disabled = false;
+      }
+    }
+
     cameraSelect.addEventListener("change", () => {
       switchCamera(cameraSelect.value);
+    });
+
+    modelSelect.addEventListener("change", () => {
+      switchModel(modelSelect.value);
     });
 
     cameraRefresh.addEventListener("click", async () => {
@@ -172,6 +247,25 @@
           lastCameraIndex = data.camera_index;
         }
 
+        if (
+          data.model_id !== undefined &&
+          !modelBusy &&
+          document.activeElement !== modelSelect
+        ) {
+          const exists = Array.from(modelSelect.options).some(
+            (o) => o.value === data.model_id
+          );
+          if (!exists) {
+            const opt = document.createElement("option");
+            opt.value = data.model_id;
+            opt.textContent = modelLabels[data.model_id] || data.model_id;
+            modelSelect.appendChild(opt);
+          }
+          modelSelect.value = data.model_id;
+          lastModelId = data.model_id;
+          modelNameEl.textContent = modelLabels[data.model_id] || data.model_id;
+        }
+
         if (data.error) {
           statusEl.textContent = data.error;
           statusEl.classList.toggle("err", !data.switching);
@@ -179,7 +273,9 @@
           statusEl.textContent = "Waiting for first frame…";
           statusEl.classList.remove("err");
         } else {
-          statusEl.textContent = "Live · camera " + data.camera_index;
+          const modelLabel = modelLabels[data.model_id] || data.model_id;
+          statusEl.textContent =
+            "Live · camera " + data.camera_index + " · " + modelLabel;
           statusEl.classList.remove("err");
         }
 
@@ -203,6 +299,7 @@
     }
 
     loadCameras().catch(() => {});
+    loadModels().catch(() => {});
     refreshStats();
     setInterval(refreshStats, 1000);
   </script>
