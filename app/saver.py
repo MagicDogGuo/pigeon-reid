@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Optional
@@ -14,6 +16,83 @@ from app.counter import VisitStats
 
 # Injected clock for tests; production uses datetime.now (local timezone).
 NowFn = Callable[[], datetime]
+
+# Filename example: visit003_20260809_171530_n2.jpg
+_CAPTURE_TS_RE = re.compile(r"_(\d{8})_(\d{6})_")
+
+
+@dataclass(frozen=True)
+class RecentCapture:
+    """One capture file relative to captures_dir, with display date/time."""
+
+    path: str
+    date: str
+    captured_at: str
+
+    @classmethod
+    def from_path(cls, captures_dir: Path, path: Path) -> "RecentCapture":
+        rel = path.relative_to(captures_dir).as_posix()
+        captured = _parse_capture_datetime(path)
+        if captured is None:
+            captured = datetime.fromtimestamp(path.stat().st_mtime)
+        day = (
+            path.parent.name
+            if _looks_like_iso_date(path.parent.name)
+            else captured.date().isoformat()
+        )
+        return cls(
+            path=rel,
+            date=day,
+            captured_at=captured.strftime("%Y-%m-%d %H:%M:%S"),
+        )
+
+
+def list_recent_captures(
+    captures_dir: Path,
+    *,
+    limit: int = 10,
+) -> list[RecentCapture]:
+    """Return the newest JPEG captures under captures_dir (newest first)."""
+    if limit < 1:
+        return []
+    if not captures_dir.is_dir():
+        return []
+
+    scored: list[tuple[datetime, float, Path]] = []
+    for path in captures_dir.rglob("*.jpg"):
+        if not path.is_file():
+            continue
+        try:
+            path.relative_to(captures_dir)
+        except ValueError:
+            continue
+        captured = _parse_capture_datetime(path)
+        mtime = path.stat().st_mtime
+        scored.append((captured or datetime.fromtimestamp(mtime), mtime, path))
+
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [
+        RecentCapture.from_path(captures_dir, path)
+        for _captured, _mtime, path in scored[:limit]
+    ]
+
+
+def _looks_like_iso_date(name: str) -> bool:
+    try:
+        datetime.strptime(name, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
+
+
+def _parse_capture_datetime(path: Path) -> Optional[datetime]:
+    match = _CAPTURE_TS_RE.search(path.name)
+    if match is None:
+        return None
+    try:
+        return datetime.strptime(f"{match.group(1)}_{match.group(2)}", "%Y%m%d_%H%M%S")
+    except ValueError:
+        return None
 
 
 class CaptureSaver:

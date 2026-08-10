@@ -284,16 +284,28 @@
         }
 
         thumbsEl.replaceChildren();
-        for (const rel of data.recent || []) {
+        for (const item of data.recent || []) {
+          const rel = typeof item === "string" ? item : item.path;
+          if (!rel) continue;
+          const capturedAt =
+            typeof item === "string" ? "" : item.captured_at || item.date || "";
           const a = document.createElement("a");
           a.href = "/captures/" + rel;
           a.target = "_blank";
           a.rel = "noopener";
+          a.className = "thumb";
+          a.title = capturedAt ? capturedAt + " · " + rel : rel;
           const img = document.createElement("img");
           img.src = "/captures/" + rel;
-          img.alt = rel;
+          img.alt = capturedAt || rel;
           img.loading = "lazy";
           a.appendChild(img);
+          if (capturedAt) {
+            const caption = document.createElement("span");
+            caption.className = "thumb-date";
+            caption.textContent = capturedAt;
+            a.appendChild(caption);
+          }
           thumbsEl.appendChild(a);
         }
       } catch (err) {

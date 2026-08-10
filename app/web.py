@@ -21,10 +21,10 @@ from app.config import (
 )
 from app.counter import VisitCounter, VisitStats
 from app.detector import Detector, list_camera_indices
-from app.saver import CaptureSaver
+from app.saver import CaptureSaver, RecentCapture, list_recent_captures
 from app.visit_store import VisitCsvStore
 
-RECENT_CAPTURE_LIMIT = 12
+RECENT_CAPTURE_LIMIT = 10
 JPEG_QUALITY = 80
 MJPEG_BOUNDARY = b"frame"
 
@@ -35,7 +35,7 @@ class MonitorSnapshot:
 
     jpeg_bytes: Optional[bytes]
     stats: Optional[VisitStats]
-    recent: list[str]
+    recent: list[RecentCapture]
     error: Optional[str]
     camera_index: int
     model_id: str
@@ -52,7 +52,10 @@ class MonitorRuntime:
         self._lock = threading.Lock()
         self._jpeg_bytes: Optional[bytes] = None
         self._stats: Optional[VisitStats] = None
-        self._recent: Deque[str] = deque(maxlen=RECENT_CAPTURE_LIMIT)
+        self._recent: Deque[RecentCapture] = deque(
+            list_recent_captures(config.captures_dir, limit=RECENT_CAPTURE_LIMIT),
+            maxlen=RECENT_CAPTURE_LIMIT,
+        )
         self._error: Optional[str] = None
         self._camera_index = config.camera_index
         self._model_id = config.model_id
@@ -162,15 +165,19 @@ class MonitorRuntime:
         self,
         jpeg_bytes: bytes,
         stats: VisitStats,
-        saved_rel: Optional[str],
+        saved: Optional[RecentCapture],
     ) -> None:
         with self._lock:
             self._jpeg_bytes = jpeg_bytes
             self._stats = stats
             self._error = None
             self._switching = False
-            if saved_rel is not None:
-                self._recent.appendleft(saved_rel)
+            if saved is not None:
+                # Move to front if already present (e.g. same path refreshed).
+                existing = [item for item in self._recent if item.path == saved.path]
+                for item in existing:
+                    self._recent.remove(item)
+                self._recent.appendleft(saved)
 
     def _encode_jpeg(self, frame) -> Optional[bytes]:
         ok, buf = cv2.imencode(
@@ -182,8 +189,8 @@ class MonitorRuntime:
             return None
         return buf.tobytes()
 
-    def _relative_capture(self, path: Path) -> str:
-        return path.relative_to(self._config.captures_dir).as_posix()
+    def _to_recent_capture(self, path: Path) -> RecentCapture:
+        return RecentCapture.from_path(self._config.captures_dir, path)
 
     def _sync_frame_size(self, detector: Detector) -> None:
         size = detector.frame_size
@@ -269,10 +276,10 @@ class MonitorRuntime:
                     self._set_error("jpeg encode failed")
                     continue
 
-                saved_rel = (
-                    self._relative_capture(saved) if saved is not None else None
+                saved_item = (
+                    self._to_recent_capture(saved) if saved is not None else None
                 )
-                self._publish(jpeg, stats, saved_rel)
+                self._publish(jpeg, stats, saved_item)
         except Exception as exc:  # noqa: BLE001 — surface to UI
             self._set_error(f"monitor loop failed: {exc}")
         finally:
@@ -320,7 +327,14 @@ def create_app(
             "concurrent_count": 0 if stats is None else stats.concurrent_count,
             "in_visit": False if stats is None else stats.in_visit,
             "local_date": None if stats is None else stats.local_date.isoformat(),
-            "recent": snap.recent,
+            "recent": [
+                {
+                    "path": item.path,
+                    "date": item.date,
+                    "captured_at": item.captured_at,
+                }
+                for item in snap.recent
+            ],
             "error": snap.error,
             "has_frame": snap.jpeg_bytes is not None,
             "camera_index": snap.camera_index,
