@@ -22,6 +22,7 @@ from app.config import (
 from app.counter import VisitCounter, VisitStats
 from app.detector import Detector, list_camera_indices
 from app.saver import CaptureSaver
+from app.visit_store import VisitCsvStore
 
 RECENT_CAPTURE_LIMIT = 12
 JPEG_QUALITY = 80
@@ -237,7 +238,8 @@ class MonitorRuntime:
 
     def _run_loop(self) -> None:
         detector = Detector(self._config)
-        counter = VisitCounter(self._config)
+        store = VisitCsvStore(self._config.visits_csv_path)
+        counter = VisitCounter(self._config, store=store)
         saver = CaptureSaver(self._config)
         try:
             detector.open()

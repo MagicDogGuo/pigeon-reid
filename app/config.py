@@ -62,6 +62,7 @@ class AppConfig:
     confirm_sec: float
     save_interval_sec: float
     captures_dir: Path
+    visits_csv_path: Path
     camera_warmup_frames: int
     camera_probe_max: int
 
@@ -81,6 +82,7 @@ CONFIG = AppConfig(
     confirm_sec=2.0,
     save_interval_sec=10.0,
     captures_dir=ROOT_DIR / "data" / "captures",
+    visits_csv_path=ROOT_DIR / "data" / "visits.csv",
     camera_warmup_frames=5,
     camera_probe_max=5,
 )

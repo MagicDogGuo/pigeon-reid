@@ -22,6 +22,7 @@ data/gallery/**
 !data/gallery/**/.gitkeep
 data/captures/**
 !data/captures/.gitkeep
+data/visits.csv
 data/samples/
 
 # Optional cloned reference repos (keep folder via .gitkeep)

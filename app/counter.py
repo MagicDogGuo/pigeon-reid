@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Callable, Optional
 
 from app.config import AppConfig, CONFIG
+from app.visit_store import VisitCsvStore
 
 # Injected clock for tests; production uses datetime.now (local timezone).
 NowFn = Callable[[], datetime]
@@ -32,7 +34,8 @@ class VisitCounter:
     - presence must last confirm_sec before a visit starts (+N) and can be saved
     - same visit does not add again (count may change mid-visit)
     - continuous visit_gap_sec of zeros ends the visit
-    - local calendar day rollover resets visits_today
+    - local calendar day rollover resets visits_today (or reloads CSV for that day)
+    - optional VisitCsvStore restores visits_today across restarts
     """
 
     def __init__(
@@ -40,15 +43,31 @@ class VisitCounter:
         config: AppConfig,
         *,
         now_fn: Optional[NowFn] = None,
+        store: Optional[VisitCsvStore] = None,
     ) -> None:
         self._visit_gap_sec = config.visit_gap_sec
         self._confirm_sec = config.confirm_sec
         self._now_fn = now_fn or datetime.now
-        self._visits_today = 0
+        self._store = store
         self._in_visit = False
         self._zero_since: Optional[datetime] = None
         self._present_since: Optional[datetime] = None
         self._local_date = self._now_fn().date()
+        self._visits_today = self._load_visits(self._local_date)
+
+    def _load_visits(self, day: date) -> int:
+        if self._store is None:
+            return 0
+        return self._store.load_visits(day)
+
+    def _persist(self, now: datetime) -> None:
+        if self._store is None:
+            return
+        self._store.save_visits(
+            self._local_date,
+            self._visits_today,
+            updated_at=now,
+        )
 
     def update(self, box_count: int) -> VisitStats:
         if box_count < 0:
@@ -58,7 +77,7 @@ class VisitCounter:
         today = now.date()
         if today != self._local_date:
             self._local_date = today
-            self._visits_today = 0
+            self._visits_today = self._load_visits(today)
             self._in_visit = False
             self._zero_since = None
             self._present_since = None
@@ -81,6 +100,7 @@ class VisitCounter:
                     self._present_since = None
                     self._visits_today += box_count
                     visit_started = True
+                    self._persist(now)
         else:
             self._present_since = None
             if self._in_visit:
@@ -120,6 +140,10 @@ def _assert(cond: bool, msg: str) -> None:
 
 def _demo() -> None:
     """Deterministic smoke: confirm 2s, brief FP ignored, leave, re-enter, day rollover."""
+    import shutil
+    import tempfile
+    from dataclasses import replace
+
     clock = _FakeClock(datetime(2026, 8, 9, 12, 0, 0))
     counter = VisitCounter(CONFIG, now_fn=clock)
 
@@ -185,6 +209,24 @@ def _demo() -> None:
     clock.now = datetime(2026, 8, 10, 0, 0, 3)
     s = counter.update(1)
     _assert(s.visits_today == 1 and s.visit_started, "new day first visit")
+
+    # CSV persist + restore across counter restart.
+    tmp = Path(tempfile.mkdtemp(prefix="pigeon-reid-visits-"))
+    try:
+        csv_path = tmp / "visits.csv"
+        cfg = replace(CONFIG, visits_csv_path=csv_path)
+        store = VisitCsvStore(cfg.visits_csv_path)
+        clock2 = _FakeClock(datetime(2026, 8, 10, 9, 0, 0))
+        c1 = VisitCounter(cfg, now_fn=clock2, store=store)
+        c1.update(2)
+        clock2.now = datetime(2026, 8, 10, 9, 0, 2)
+        s1 = c1.update(2)
+        _assert(s1.visits_today == 2 and csv_path.is_file(), "csv written")
+        c2 = VisitCounter(cfg, now_fn=clock2, store=store)
+        s2 = c2.update(0)
+        _assert(s2.visits_today == 2, "csv restored on restart")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
     print("counter smoke OK")
     print(
